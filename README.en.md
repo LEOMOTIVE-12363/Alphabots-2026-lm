@@ -51,16 +51,18 @@ Driver Station port **1 takes priority over 0** for both driving and every butto
 
 LT extends the intake and runs collection; release stops collection without retracting. D-pad left retracts and homes against the inward stop. LB/RT reverse is momentary: the reverse outputs are recomputed from the active pad's held state — while the controlling pad holds LB the intake roller, indexer, and feeder reverse (RT: indexer/feeder only); they zero on release, disconnect, priority loss when the taking-over pad is not holding the same key, or while the robot is disabled. The bindings take no subsystem ownership, so a concurrently running shooting loop overwrites the reverse writes (original behavior, intentionally unchanged).
 
-## Operator panel & feed gating
+## Operator panel & immediate feeding
 
-While a shot command runs, feeding is continuously gated on live readiness: flywheel speed limit > 0, drum at target speed, and hood at target angle must all hold. Losing readiness mid-volley pauses the feeder / indexer / intake roller (drum and hood keep their targets); once readiness is stable again (0.15 s debounce) feeding auto-resumes without re-pressing; releasing the key ends the command. Manual (X) tuning shots follow the same rule.
+While the robot is enabled and the button's controller has control priority, holding an existing shoot button feeds immediately: RB on either port (`Shooting(false)`, normal velocity feed), A on port 0 (`Shooting(true)`, retaining 50 A current requests for Indexer and Feeder), and X on port 0 (Manual) all drive Indexer and Feeder at their existing targets on the command's first `execute`. Drum and Hood are still driven to their original targets, and the intake roller keeps its existing behavior. The only remaining readiness permit is `Flywheel Speed Limit (%) > 0`: 0% stops feeding and restoring any positive value resumes on that loop. Drum not yet at speed or sagging, Hood not yet at angle or drifting, mid-volley target changes, and readiness debounce no longer pause, delay, or gate feeding. These shooting paths do not read vision, AprilTags, pose, or aiming data. Button release, controller disconnect, loss of control priority, command interruption, or robot disable still ends the corresponding command and stops feeding.
 
-The Elastic demo page shows read-only operator status:
+Automatic jam clearing keeps its existing threshold, confirmation, reverse outputs, and duration; the retract timer remains frozen during 0% pauses and UNJAM. When the back-off finishes, a still-active command immediately resumes its previous feeding state whenever the flywheel limit is positive, without waiting for drum/hood readiness or a stable window.
+
+`Robot Action`, `Feed Allowed`, and `Feed Blocked Reason` continue to report the command's actual feed decision; `drumReady` / `hoodReady` / `stableReady` remain measurement-based diagnostics, not feeding permits. The Elastic demo page shows read-only operator status:
 
 - `Robot Action` / `Feed Allowed` / `Feed Blocked Reason`
 - `Drum Target Speed (rot/s)` / `Drum Actual Speed (rot/s)`
 
-The gating behavior and panel are not yet verified on the real robot.
+The immediate-feed and post-unjam behavior, and the panel, are not yet verified on the real robot.
 
 ## Build & simulation
 
