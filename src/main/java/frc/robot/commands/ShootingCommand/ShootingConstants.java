@@ -11,12 +11,11 @@ public final class ShootingConstants {
   public static final LoggedTunableNumber FeederRotpsTunable =
       new LoggedTunableNumber("Shooting/FeederRotps", 80);
 
-  // Readiness tolerances used to decide when SPIN_UP is satisfied and we may shoot.
+  // Measurement-only readiness tolerances for diagnostics; they do not gate feeding.
   public static final double SHOOTER_VELOCITY_TOLERANCE_ROTPS = 1.;
   public static final double HOOD_ANGLE_TOLERANCE_ROT = 0.02;
 
-  // SPIN_UP -> SHOOT fires only after everything has been continuously ready for this long,
-  // so a single lucky velocity sample inside the tolerance band cannot start the volley.
+  // Debounce window for the stableReady diagnostic only; it never delays or pauses feeding.
   public static final double READY_DEBOUNCE_SEC = 0.15;
 
   // Indexer jam detection during SHOOT/RETRACT: stator current continuously above this threshold

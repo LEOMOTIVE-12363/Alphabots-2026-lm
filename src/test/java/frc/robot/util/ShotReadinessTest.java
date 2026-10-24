@@ -98,7 +98,23 @@ class ShotReadinessTest {
   }
 
   @Test
-  void hoodOffTargetBlocksWithHoodReason() {
+  void drumOffSpeedRemainsATruthfulDiagnostic() {
+    DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+    commandAndSettle();
+
+    ShotReadiness.Evaluation eval =
+        new ShotReadiness()
+            .update(DrumConstants.MaxShotVelocity + 7.0, Hood.mInstance.getPositionRot());
+    assertFalse(eval.flywheelZero());
+    assertFalse(eval.drumReady(), "the measured speed must not be faked ready");
+    assertTrue(eval.hoodReady());
+    assertFalse(eval.rawReady(), "raw readiness remains a measurement diagnostic");
+    assertFalse(eval.stableReady());
+    assertEquals(ShotReadiness.REASON_DRUM_NOT_AT_SPEED, eval.blockReason());
+  }
+
+  @Test
+  void hoodOffTargetRemainsATruthfulDiagnostic() {
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
     commandAndSettle();
 
@@ -106,9 +122,11 @@ class ShotReadinessTest {
     double farTargetRot = Hood.mInstance.getPositionRot() + 0.5;
     ShotReadiness.Evaluation eval =
         new ShotReadiness().update(DrumConstants.MaxShotVelocity, farTargetRot);
-    assertTrue(eval.drumReady(), "flywheel ready, so the hood reason surfaces");
-    assertFalse(eval.hoodReady());
-    assertFalse(eval.rawReady());
+    assertFalse(eval.flywheelZero());
+    assertTrue(eval.drumReady(), "flywheel ready, so the hood diagnostic surfaces");
+    assertFalse(eval.hoodReady(), "the measured angle must not be faked ready");
+    assertFalse(eval.rawReady(), "raw readiness remains a measurement diagnostic");
+    assertFalse(eval.stableReady());
     assertEquals(ShotReadiness.REASON_HOOD_NOT_AT_ANGLE, eval.blockReason());
   }
 

@@ -1,7 +1,18 @@
 # 0007 — Continuous feed readiness gate
 
 - Date: 2026-10-22
-- Status: Accepted
+- Status: Superseded by [0011](0011-immediate-feed-only-flywheel-zero-gate.md)
+  (2026-10-24) for drum/hood/stable-readiness feed gating; see 0011 for the
+  behavior retained from this record
+
+> **Superseded on 2026-10-24 by [0011 — Immediate feed with only flywheel-zero gating](0011-immediate-feed-only-flywheel-zero-gate.md).**
+> The continuous drum-at-speed, hood-at-angle, and stable-readiness feed gate
+> described below is no longer the desired behavior. This includes startup and
+> recovery debounce waits, mid-volley pauses on speed/hood/target changes, the
+> equivalent Manual gate, and post-UNJAM readiness re-gating. The original record
+> and amendments are retained below for history only; 0011 defines the immediate-
+> feed replacement and the safety, lifecycle, jam/timer, controller, and dashboard
+> behavior that remains in force.
 
 ## Context
 

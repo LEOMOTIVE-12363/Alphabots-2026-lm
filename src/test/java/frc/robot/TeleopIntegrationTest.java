@@ -29,6 +29,7 @@ import frc.robot.subsystems.Drum.Drum;
 import frc.robot.subsystems.Drum.DrumConstants;
 import frc.robot.subsystems.Feeder.Feeder;
 import frc.robot.subsystems.Hood.Hood;
+import frc.robot.subsystems.Hood.HoodConstants;
 import frc.robot.subsystems.Indexer.Indexer;
 import frc.robot.subsystems.IntakeDeploy.IntakeDeploy;
 import frc.robot.subsystems.IntakeRoller.IntakeRoller;
@@ -60,9 +61,10 @@ import org.littletonrobotics.junction.networktables.LoggedNetworkNumber;
  * (the same path an Elastic text input takes).
  *
  * <p>Timing note: inside one scheduler loop the subsystem periodics read the mechanism inputs
- * BEFORE this loop's command writes land, so an output change an edge command makes (end() stops,
- * press writes) is observable one loop later — every edge helper here follows with a settle loop
- * before assertions, which still fails if the command kept feeding one loop longer than allowed.
+ * BEFORE this loop's command writes land, so an output change an edge command makes is ordinarily
+ * observable one loop later. Stop assertions therefore use a settle loop. First-execute assertions
+ * instead call {@link #refreshShotRequests()} after that same scheduler run, exposing the latched
+ * requests without executing the command a second time.
  *
  * <p>Singleton/binding hygiene: this class is the only test that constructs RobotContainer (the
  * reverse-path acceptance classes construct their own — see
@@ -301,6 +303,89 @@ class TeleopIntegrationTest {
 
   private static double feederAmps() {
     return Feeder.mInstance.getCurrentSetpointAmps();
+  }
+
+  private static double indexerSetpoint() {
+    return Indexer.mInstance.getVelocitySetpointRotPerSec();
+  }
+
+  /** Exposes requests written by the scheduler run that just finished, without another execute. */
+  private static void refreshShotRequests() {
+    Drum.mInstance.periodic();
+    Hood.mInstance.periodic();
+    Indexer.mInstance.periodic();
+    Feeder.mInstance.periodic();
+  }
+
+  /** Holds the measured drum at zero and the hood 18 degrees away from its zero target. */
+  private static void arrangeUnreadyShot() {
+    Drum.mInstance.stop();
+    Hood.mInstance.stop();
+    Hood.mInstance.setEncoderPositionRot(0.05);
+    Drum.mInstance.periodic();
+    Hood.mInstance.periodic();
+  }
+
+  /** Presses through the real binding and reads the requests from its very first execute(). */
+  private static void pressWithUnreadyShot(int port, int button) {
+    connect(port);
+    arrangeUnreadyShot();
+    assertEquals(0.0, Drum.mInstance.getVelocityRotPerSec(), EPS, "drum starts stopped");
+    assertEquals(0.05, Hood.mInstance.getPositionRot(), EPS, "hood starts off target");
+
+    press(port, button);
+    assertEquals(
+        0.0,
+        Drum.mInstance.getVelocityRotPerSec(),
+        EPS,
+        "the first execute saw the stopped drum, not a ready measurement");
+    assertEquals(
+        0.05, Hood.mInstance.getPositionRot(), EPS, "the first execute saw the off-target hood");
+    refreshShotRequests();
+  }
+
+  private static void assertVelocityFeed(double indexerRotps, double feederRotps) {
+    assertEquals(indexerRotps, indexerSetpoint(), EPS, "indexer velocity request");
+    assertEquals(feederRotps, feederSetpoint(), EPS, "feeder velocity request");
+    assertEquals(MotorIO.ControlMode.VELOCITY, Indexer.mInstance.getControlMode());
+    assertEquals(MotorIO.ControlMode.VELOCITY, Feeder.mInstance.getControlMode());
+    assertEquals(0.0, Indexer.mInstance.getCurrentSetpointAmps(), EPS);
+    assertEquals(0.0, feederAmps(), EPS);
+  }
+
+  private static void assertCurrentFeed() {
+    assertEquals(50.0, Indexer.mInstance.getCurrentSetpointAmps(), EPS, "indexer current");
+    assertEquals(50.0, feederAmps(), EPS, "feeder current");
+    assertEquals(MotorIO.ControlMode.CURRENT, Indexer.mInstance.getControlMode());
+    assertEquals(MotorIO.ControlMode.CURRENT, Feeder.mInstance.getControlMode());
+    assertEquals(0.0, indexerSetpoint(), EPS);
+    assertEquals(0.0, feederSetpoint(), EPS);
+  }
+
+  private static void assertFeedPathStopped() {
+    assertEquals(0.0, indexerSetpoint(), EPS, "indexer velocity stopped");
+    assertEquals(0.0, feederSetpoint(), EPS, "feeder velocity stopped");
+    assertEquals(0.0, Indexer.mInstance.getCurrentSetpointAmps(), EPS, "indexer current off");
+    assertEquals(0.0, feederAmps(), EPS, "feeder current off");
+    assertEquals(0.0, Indexer.mInstance.getVoltageSetpoint(), EPS, "indexer voltage off");
+    assertEquals(0.0, Feeder.mInstance.getVoltageSetpoint(), EPS, "feeder voltage off");
+  }
+
+  private static boolean stepUntilAnyFeeding(int maxLoops) {
+    for (int i = 0; i < maxLoops; i++) {
+      stepRobot();
+      if (Math.abs(feederSetpoint()) > EPS || Math.abs(feederAmps()) > EPS) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Establishes a running volley without making its startup timing part of the assertion. */
+  private static void startFeedingForSetup(int port, int button) {
+    connect(port);
+    press(port, button);
+    assertTrue(stepUntilAnyFeeding(40), "binding started a volley for the test setup");
   }
 
   private static boolean stepUntilFeeding(int maxLoops) {
@@ -649,10 +734,17 @@ class TeleopIntegrationTest {
 
   @Test
   void portOneUnboundKeysTriggerNothing() {
+    arrangeUnreadyShot();
     connect(1);
     // X (Manual), A (current-feed Shooting), Y (zeroing) exist on port 0 only.
     press(1, BUTTON_X);
+    refreshShotRequests();
+    assertFeedPathStopped();
+    assertEquals(0.0, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
     press(1, BUTTON_A);
+    refreshShotRequests();
+    assertFeedPathStopped();
+    assertEquals(0.0, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
     press(1, BUTTON_Y);
     DriverStationSim.setJoystickAxis(1, 3, 1.0); // RT (full-only reverse)
     stepRobot();
@@ -674,45 +766,284 @@ class TeleopIntegrationTest {
   }
 
   // ---------------------------------------------------------------------------
-  // Item 6: pause + release / interruption through the real bindings
+  // Immediate feed through the real bindings, with no vision or readiness gate.
   // ---------------------------------------------------------------------------
 
   @Test
-  void releaseDuringPauseDoesNotAutoResumeAndRepressWorks() {
+  void portOneRbFeedsFirstExecuteBeforeReady() {
+    pressWithUnreadyShot(1, BUTTON_RB);
+
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
+    assertEquals(DrumConstants.MaxShotVelocity, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+    assertEquals(0.0, Hood.mInstance.getPositionSetpointRot(), EPS);
+    release(1, BUTTON_RB);
+    settle();
+  }
+
+  @Test
+  void portZeroRbFeedsFirstExecuteBeforeReady() {
+    pressWithUnreadyShot(0, BUTTON_RB);
+
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
+    assertEquals(DrumConstants.MaxShotVelocity, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+    assertEquals(0.0, Hood.mInstance.getPositionSetpointRot(), EPS);
+    release(0, BUTTON_RB);
+    settle();
+  }
+
+  @Test
+  void portZeroACurrentFeedsFirstExecuteBeforeReady() {
+    pressWithUnreadyShot(0, BUTTON_A);
+
+    assertCurrentFeed();
+    assertEquals(DrumConstants.MaxShotVelocity, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+    assertEquals(0.0, Hood.mInstance.getPositionSetpointRot(), EPS);
+    release(0, BUTTON_A);
+    settle();
+  }
+
+  @Test
+  void portZeroXManualFeedsFirstExecuteBeforeReady() {
+    pressWithUnreadyShot(0, BUTTON_X);
+
+    assertVelocityFeed(
+        ManualConstants.IndexerRotpsTunable.getAsDouble(),
+        ManualConstants.FeederRotpsTunable.getAsDouble());
+    assertEquals(
+        ManualConstants.ShooterRotpsTunable.getAsDouble(),
+        Drum.mInstance.getVelocitySetpointRotPerSec(),
+        EPS);
+    assertEquals(
+        ManualConstants.HoodDegTunable.getAsDouble() / 360.0,
+        Hood.mInstance.getPositionSetpointRot(),
+        EPS);
+    release(0, BUTTON_X);
+    settle();
+  }
+
+  @Test
+  void portOneRbZeroStopPositiveResumeImmediately() {
+    startFeedingForSetup(1, BUTTON_RB);
+    DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
+    stepRobot();
+    refreshShotRequests();
+    assertFeedPathStopped();
+    assertEquals(0.0, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+
+    DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+    stepRobot();
+    assertEquals(0.0, Drum.mInstance.getVelocityRotPerSec(), EPS, "drum is still stopped");
+    refreshShotRequests();
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
+    release(1, BUTTON_RB);
+    settle();
+  }
+
+  @Test
+  void portZeroRbZeroStopPositiveResumeImmediately() {
+    startFeedingForSetup(0, BUTTON_RB);
+    DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
+    stepRobot();
+    refreshShotRequests();
+    assertFeedPathStopped();
+    assertEquals(0.0, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+
+    DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+    stepRobot();
+    assertEquals(0.0, Drum.mInstance.getVelocityRotPerSec(), EPS, "drum is still stopped");
+    refreshShotRequests();
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
+    release(0, BUTTON_RB);
+    settle();
+  }
+
+  @Test
+  void portZeroAZeroStopPositiveResumeImmediately() {
+    startFeedingForSetup(0, BUTTON_A);
+    DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
+    stepRobot();
+    refreshShotRequests();
+    assertFeedPathStopped();
+    assertEquals(0.0, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+
+    DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+    stepRobot();
+    assertEquals(0.0, Drum.mInstance.getVelocityRotPerSec(), EPS, "drum is still stopped");
+    refreshShotRequests();
+    assertCurrentFeed();
+    release(0, BUTTON_A);
+    settle();
+  }
+
+  @Test
+  void portZeroXZeroStopPositiveResumeImmediately() {
+    startFeedingForSetup(0, BUTTON_X);
+    DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
+    stepRobot();
+    refreshShotRequests();
+    assertFeedPathStopped();
+    assertEquals(0.0, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+
+    DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+    stepRobot();
+    assertEquals(0.0, Drum.mInstance.getVelocityRotPerSec(), EPS, "drum is still stopped");
+    refreshShotRequests();
+    assertVelocityFeed(
+        ManualConstants.IndexerRotpsTunable.getAsDouble(),
+        ManualConstants.FeederRotpsTunable.getAsDouble());
+    release(0, BUTTON_X);
+    settle();
+  }
+
+  @Test
+  void portOneRbNonzeroTargetChangeDoesNotPause() {
+    startFeedingForSetup(1, BUTTON_RB);
+    DashboardControlsTestUtil.set(FLYWHEEL, 50.0);
+    DashboardControlsTestUtil.set(HOOD, 100.0);
+
+    stepRobot();
+    assertEquals(
+        DrumConstants.MaxShotVelocity,
+        Drum.mInstance.getVelocityRotPerSec(),
+        EPS,
+        "the edit loop still measures the old drum speed");
+    assertEquals(0.0, Hood.mInstance.getPositionRot(), EPS, "hood has not moved yet");
+    refreshShotRequests();
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
+    assertEquals(
+        0.5 * DrumConstants.MaxShotVelocity, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+    assertEquals(HoodConstants.MaxAngleDeg / 360.0, Hood.mInstance.getPositionSetpointRot(), EPS);
+    release(1, BUTTON_RB);
+    settle();
+  }
+
+  @Test
+  void heldRbFeedsImmediatelyWhenPortOneTakesOver() {
+    startFeedingForSetup(0, BUTTON_RB);
+    DriverStationSim.setJoystickButton(1, BUTTON_RB, true);
+
+    connect(1);
+    refreshShotRequests();
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
+    assertEquals(DrumConstants.MaxShotVelocity, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+
+    release(0, BUTTON_RB);
+    refreshShotRequests();
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
+    release(1, BUTTON_RB);
+    settle();
+  }
+
+  @Test
+  void heldRbFeedsImmediatelyWhenPortZeroTakesOver() {
+    connect(0);
+    startFeedingForSetup(1, BUTTON_RB);
+    DriverStationSim.setJoystickButton(0, BUTTON_RB, true);
+
+    disconnect(1);
+    refreshShotRequests();
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
+    assertEquals(DrumConstants.MaxShotVelocity, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+    release(0, BUTTON_RB);
+    settle();
+  }
+
+  @Test
+  void portOneRbFeedsImmediatelyAfterUnjam() {
+    startFeedingForSetup(1, BUTTON_RB);
+    Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
+    try {
+      boolean reversing = false;
+      for (int i = 0; i < 20 && !reversing; i++) {
+        stepRobot();
+        refreshShotRequests();
+        reversing = indexerSetpoint() < -EPS;
+      }
+      assertTrue(reversing, "the existing jam confirmation still starts the back-off");
+      Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(null);
+
+      boolean firstNonReverseSeen = false;
+      for (int i = 0; i < 40 && !firstNonReverseSeen; i++) {
+        stepRobot();
+        refreshShotRequests();
+        if (indexerSetpoint() < -EPS) {
+          assertTrue(Feeder.mInstance.getVoltageSetpoint() < 0.0, "back-off continues");
+          continue;
+        }
+        firstNonReverseSeen = true;
+        assertVelocityFeed(
+            ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+            ShootingConstants.FeederRotpsTunable.getAsDouble());
+        assertTrue(OperatorStatus.feedAllowed(), "panel permits the actual resumed feed");
+        assertEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());
+      }
+      assertTrue(firstNonReverseSeen, "the fixed-duration back-off completed");
+    } finally {
+      Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(null);
+    }
+    release(1, BUTTON_RB);
+    settle();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Item 6: zero-limit stop + release / interruption through the real bindings
+  // ---------------------------------------------------------------------------
+
+  @Test
+  void releaseDuringZeroStopDoesNotAutoResumeAndRepressWorks() {
     connect(1);
     press(1, BUTTON_RB);
-    assertTrue(stepUntilFeeding(40), "Shooting(false) reached SHOOT via the RB binding");
+    assertTrue(stepUntilFeeding(40), "Shooting(false) feeds via the RB binding");
     settleToPublish();
     assertTrue(feedAllowedKey(), "panel allows while feeding");
 
-    // Lose readiness mid-volley and release the key while paused.
+    // Zero the flywheel limit and release while the feed path is stopped.
     DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
     stepRobot();
     settle();
-    assertEquals(0.0, feederSetpoint(), EPS, "feed stopped on the pause loop");
+    assertEquals(0.0, feederSetpoint(), EPS, "feed stopped on the zero-limit loop");
     settleToPublish();
-    assertFalse(feedAllowedKey(), "panel blocks while paused");
+    assertFalse(feedAllowedKey(), "panel blocks at 0%");
     assertEquals(ShotReadiness.REASON_FLYWHEEL_ZERO, feedBlockedReasonKey());
 
     release(1, BUTTON_RB);
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
-    for (int i = 0; i < 25; i++) { // 0.5 s: far past the 0.15 s debounce
+    for (int i = 0; i < 25; i++) {
       stepRobot();
       assertEquals(0.0, feederSetpoint(), EPS, "no auto-resume after release, loop " + i);
     }
     settleToPublish();
     assertEquals("Idle", robotAction(), "action fell back to Idle after the heartbeat expired");
-    assertFalse(feedAllowedKey(), "fallback preview: drum at stow, not allowed");
-    assertEquals(ShotReadiness.REASON_DRUM_NOT_AT_SPEED, feedBlockedReasonKey());
+    assertTrue(feedAllowedKey(), "positive flywheel limit permits a future feed");
+    assertEquals(ShotReadiness.REASON_NONE, feedBlockedReasonKey());
 
-    // A fresh press must work — no locked state.
+    // A fresh press feeds on its first execute — no locked state and no readiness delay.
     press(1, BUTTON_RB);
-    assertTrue(stepUntilFeeding(40), "re-press starts a fresh volley");
+    refreshShotRequests();
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
     release(1, BUTTON_RB);
   }
 
   @Test
-  void releaseDuringPauseDoesNotAutoResumeCurrentFeedMode() {
+  void releaseDuringZeroStopDoesNotAutoResumeCurrentFeedMode() {
     connect(0); // A = Shooting(true) exists on port 0 only
     press(0, BUTTON_A);
     boolean currentFeeding = false;
@@ -721,12 +1052,12 @@ class TeleopIntegrationTest {
       currentFeeding =
           Feeder.mInstance.getControlMode() == MotorIO.ControlMode.CURRENT && feederAmps() > 49.0;
     }
-    assertTrue(currentFeeding, "current-feed mode reached SHOOT (50 A request)");
+    assertTrue(currentFeeding, "current-feed mode feeds at 50 A");
 
     DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
     stepRobot();
     settle();
-    assertEquals(0.0, feederAmps(), EPS, "current request withdrawn on the pause loop");
+    assertEquals(0.0, feederAmps(), EPS, "current request withdrawn at 0%");
     assertEquals(0.0, feederSetpoint(), EPS);
 
     release(0, BUTTON_A);
@@ -738,25 +1069,21 @@ class TeleopIntegrationTest {
     }
 
     press(0, BUTTON_A);
-    boolean resumed = false;
-    for (int i = 0; i < 40 && !resumed; i++) {
-      stepRobot();
-      resumed = feederAmps() > 49.0;
-    }
-    assertTrue(resumed, "re-press restarts current-feed shooting");
+    refreshShotRequests();
+    assertCurrentFeed();
     release(0, BUTTON_A);
   }
 
   @Test
-  void releaseDuringPrepareDoesNotAutoResumeManual() {
+  void releaseDuringZeroStopDoesNotAutoResumeManual() {
     connect(0); // X = Manual exists on port 0 only
     press(0, BUTTON_X);
-    assertTrue(stepUntilManualFeeding(40), "Manual reached SHOOT via the X binding");
+    assertTrue(stepUntilManualFeeding(40), "Manual feeds via the X binding");
 
     DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
     stepRobot();
     settle();
-    assertEquals(0.0, feederSetpoint(), EPS, "Manual dropped to PREPARE on the detection loop");
+    assertEquals(0.0, feederSetpoint(), EPS, "Manual stopped on the zero-limit loop");
 
     release(0, BUTTON_X);
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
@@ -766,20 +1093,23 @@ class TeleopIntegrationTest {
     }
 
     press(0, BUTTON_X);
-    assertTrue(stepUntilManualFeeding(40), "re-press restarts Manual");
+    refreshShotRequests();
+    assertVelocityFeed(
+        ManualConstants.IndexerRotpsTunable.getAsDouble(),
+        ManualConstants.FeederRotpsTunable.getAsDouble());
     release(0, BUTTON_X);
   }
 
   @Test
-  void conflictingCommandInterruptsPausedShootingAndCleanRestartFollows() {
+  void conflictingCommandInterruptsZeroStoppedShootingAndCleanRestartFollows() {
     connect(1);
     press(1, BUTTON_RB);
-    assertTrue(stepUntilFeeding(40), "reached SHOOT");
+    assertTrue(stepUntilFeeding(40), "feeding");
 
     DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
     stepRobot();
     settle();
-    assertEquals(0.0, feederSetpoint(), EPS, "paused");
+    assertEquals(0.0, feederSetpoint(), EPS, "stopped at 0%");
 
     // LT starts IntakeCommand, whose requirements overlap Shooting's: legal interruption.
     setTrigger(1, 0.9);
@@ -802,7 +1132,10 @@ class TeleopIntegrationTest {
     // the re-press needs a release first — same held-button rule as the disable case.
     release(1, BUTTON_RB);
     press(1, BUTTON_RB); // fresh press must work after the interruption
-    assertTrue(stepUntilFeeding(40), "clean restart after interruption");
+    refreshShotRequests();
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
     release(1, BUTTON_RB);
   }
 
@@ -832,7 +1165,10 @@ class TeleopIntegrationTest {
 
     release(1, BUTTON_RB);
     press(1, BUTTON_RB);
-    assertTrue(stepUntilFeeding(40), "release + re-press restarts after a disable cycle");
+    refreshShotRequests();
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
     release(1, BUTTON_RB);
   }
 
@@ -870,10 +1206,10 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void reconnectWhileButtonHeldRestartsHeldCommand() {
+  void reconnectWhileButtonHeldRestartsHeldCommandImmediately() {
     connect(1);
     press(1, BUTTON_RB);
-    assertTrue(stepUntilFeeding(40), "reached SHOOT");
+    assertTrue(stepUntilFeeding(40), "feeding");
 
     disconnect(1);
     settle();
@@ -883,13 +1219,10 @@ class TeleopIntegrationTest {
     // the actual behavior — recorded here so a change to it is noticed.
     DriverStationSim.setJoystickButton(1, BUTTON_RB, true);
     connect(1);
-    boolean resumed = false;
-    for (int i = 0; i < 40 && !resumed; i++) {
-      stepRobot();
-      resumed =
-          Math.abs(feederSetpoint() - ShootingConstants.FeederRotpsTunable.getAsDouble()) < EPS;
-    }
-    assertTrue(resumed, "button held across a reconnect restarts the held command");
+    refreshShotRequests();
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
     release(1, BUTTON_RB);
   }
 
@@ -976,10 +1309,8 @@ class TeleopIntegrationTest {
 
   @Test
   void operatorPanelKeysPublishTypesAndValues() {
-    connect(1);
-    press(1, BUTTON_RB);
-    assertTrue(stepUntilFeeding(40), "feeding");
-    settleToPublish(); // guarantee the 10 Hz publish fired after entering SHOOT
+    pressWithUnreadyShot(1, BUTTON_RB);
+    settleToPublish(); // guarantee the 10 Hz publish fired after feeding began
 
     var nt = NetworkTableInstance.getDefault();
     assertTrue(nt.getEntry("/SmartDashboard/Robot Action").exists());
@@ -997,6 +1328,10 @@ class TeleopIntegrationTest {
     assertTrue(nt.getEntry("/SmartDashboard/Battery Voltage (V)").exists());
     assertTrue(nt.getEntry("/SmartDashboard/Battery Voltage (V)").getDouble(0) > 5.0);
     assertTrue(nt.getEntry("/SmartDashboard/Controller 1 Connected").getBoolean(false));
+    refreshShotRequests();
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
     release(1, BUTTON_RB);
   }
 
@@ -1101,6 +1436,38 @@ class TeleopIntegrationTest {
     } finally {
       overrideTunable(ManualConstants.HoodDegTunable, "Manual/HoodDegree", originalManualHoodDeg);
     }
+  }
+
+  @Test
+  void idleHoodFollowerYieldsToShootingAndResumesLatestDashboardTarget() {
+    connect(0);
+    DashboardControlsTestUtil.set(HOOD, 100.0);
+    arrangeUnreadyShot();
+
+    press(0, BUTTON_RB);
+    refreshShotRequests();
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
+    assertHoodPositionTarget(
+        25.0 / 360.0, "Shooting must own the hood and feed before it is ready");
+
+    DashboardControlsTestUtil.set(HOOD, 40.0);
+    stepRobot();
+    refreshShotRequests();
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
+    assertHoodPositionTarget(
+        10.0 / 360.0, "the active Shooting command must follow the new hood target");
+
+    release(0, BUTTON_RB);
+    settle();
+    settle();
+    Hood.mInstance.periodic();
+    assertHoodPositionTarget(
+        10.0 / 360.0, "after Shooting ends, idle following must restore the latest target");
+    assertFeedPathStopped();
   }
 
   @Test
@@ -1220,7 +1587,7 @@ class TeleopIntegrationTest {
     // Manual never comes back on its own while X is still held, and a fresh press restarts it.
     connect(0);
     press(0, BUTTON_X);
-    assertTrue(stepUntilManualFeeding(40), "Manual reached SHOOT via the X binding");
+    assertTrue(stepUntilManualFeeding(40), "Manual feeds via the X binding");
     assertEquals(
         ManualConstants.ShooterRotpsTunable.getAsDouble(),
         Drum.mInstance.getVelocitySetpointRotPerSec(),
@@ -1228,7 +1595,10 @@ class TeleopIntegrationTest {
         "Manual drum target");
 
     press(0, BUTTON_RB); // Shooting requires the same subsystems: interrupts Manual
-    assertTrue(stepUntilFeeding(10), "Shooting took over and feeds");
+    refreshShotRequests();
+    assertVelocityFeed(
+        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+        ShootingConstants.FeederRotpsTunable.getAsDouble());
     assertEquals(
         DrumConstants.MaxShotVelocity,
         Drum.mInstance.getVelocitySetpointRotPerSec(),
@@ -1246,7 +1616,10 @@ class TeleopIntegrationTest {
 
     release(0, BUTTON_X);
     press(0, BUTTON_X);
-    assertTrue(stepUntilManualFeeding(40), "a fresh X press restarts Manual after interruption");
+    refreshShotRequests();
+    assertVelocityFeed(
+        ManualConstants.IndexerRotpsTunable.getAsDouble(),
+        ManualConstants.FeederRotpsTunable.getAsDouble());
     release(0, BUTTON_X);
   }
 
