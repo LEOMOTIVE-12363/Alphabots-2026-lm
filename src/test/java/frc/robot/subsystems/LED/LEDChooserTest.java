@@ -63,7 +63,7 @@ class LEDChooserTest {
 
     for (JsonNode tab : root.path("tabs")) {
       for (JsonNode widget : tab.path("grid_layout").path("containers")) {
-        if (!widget.path("type").asText("").equals("ComboBox")
+        if (!widget.path("type").asText("").equals("ComboBox Chooser")
             || !widget.path("properties").path("topic").asText("").equals(CHOOSER_PATH)) {
           continue;
         }

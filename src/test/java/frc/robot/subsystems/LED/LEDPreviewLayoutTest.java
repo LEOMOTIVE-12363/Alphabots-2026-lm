@@ -61,7 +61,7 @@ class LEDPreviewLayoutTest {
   @Test
   void previewTabHasExactlyTwoExistingChoosersAndSixUniqueColorViews() {
     List<JsonNode> widgets = containers(tab("LED Preview"));
-    List<JsonNode> choosers = widgetsOfType(widgets, "ComboBox");
+    List<JsonNode> choosers = widgetsOfType(widgets, "ComboBox Chooser");
     List<JsonNode> colorViews = widgetsOfType(widgets, "Multi Color View");
 
     assertAll(
@@ -75,12 +75,40 @@ class LEDPreviewLayoutTest {
                 "every preview widget must have a unique title"));
     assertEquals(Set.of(PATTERN_TOPIC, EFFECT_TOPIC), topics(choosers));
     for (JsonNode chooser : choosers) {
-      assertEquals("string", chooser.path("properties").path("data_type").asText());
+      assertNativeChooserContract(chooser);
     }
 
     Set<String> actualTopics = topics(colorViews);
     assertEquals(6, actualTopics.size(), "preview topics must be unique");
     assertEquals(expectedPreviewTopics(), actualTopics);
+  }
+
+  @Test
+  void allFourLedChoosersUseNativeElasticWidgetContract() {
+    List<JsonNode> choosers = new ArrayList<>();
+    for (String tabName : List.of("demo", "LED Preview")) {
+      for (JsonNode widget : containers(tab(tabName))) {
+        String topic = widget.path("properties").path("topic").asText();
+        if (topic.equals(PATTERN_TOPIC) || topic.equals(EFFECT_TOPIC)) {
+          choosers.add(widget);
+        }
+      }
+    }
+
+    assertEquals(4, choosers.size());
+    for (JsonNode chooser : choosers) {
+      assertNativeChooserContract(chooser);
+    }
+  }
+
+  private static void assertNativeChooserContract(JsonNode chooser) {
+    JsonNode properties = chooser.path("properties");
+    String title = chooser.path("title").asText();
+    assertAll(
+        () -> assertEquals("ComboBox Chooser", chooser.path("type").asText(), title),
+        () -> assertTrue(properties.path("sort_options").isBoolean(), title + " sort_options"),
+        () -> assertEquals(false, properties.path("sort_options").asBoolean(), title),
+        () -> assertTrue(properties.get("data_type") == null, title + " legacy data_type"));
   }
 
   @Test
