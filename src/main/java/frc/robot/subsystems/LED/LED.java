@@ -51,6 +51,7 @@ public class LED extends SubsystemBase {
   private final AddressableLEDBuffer buffer = new AddressableLEDBuffer(LEDConstants.LENGTH_PIXELS);
   private final LEDLayout layout = LEDLayout.fromConstants();
   private final LEDSection[] sections = layout.sections();
+  private final LEDPreview preview = new LEDPreview();
 
   /**
    * The CANdle onboard thumbnail: the shared render logic evaluated at eight normalized ball-path
@@ -240,6 +241,7 @@ public class LED extends SubsystemBase {
     io.writeBuffer(buffer);
 
     publishStatus(pattern, effect, brightnessPercent, disabled, flowTarget);
+    preview.update(pattern, effect, now);
   }
 
   /**

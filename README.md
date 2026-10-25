@@ -67,6 +67,14 @@ LT 同时展开 intake 并吸球，松开后停止吸球但不自动收回。方
 
 以上立即送料、清堵恢复行为与面板尚未在实车上验证。
 
+## Elastic LED 预览
+
+`elastic-layout-1025.json` 的 `LED Preview` 页提供独立于实灯输出的配色与动画预览。使用时必须正在运行机器人代码或桌面仿真，并将 Elastic 连接到该进程的 NetworkTables；仅打开布局不会产生预览数据。
+
+- 顶部 `LED Pattern` 与 `LED Idle Effect` 沿用现有设置键。大的 `Current Selection` 卡片预览当前 Pattern（主题 Pattern 使用当前 Idle Effect）；下方五张固定卡片分别展示 Marigold Bridge / Slow Flow、Festival Night / Breathe、Papel Fiesta / Chase、Alebrije Glow / Slow Flow、Candle Memory / Static 的主题与推荐效果。
+- 所有卡片按固定参考亮度生成，不读取或显示实灯状态或实际亮度；`LED Brightness (%)` 不缩放预览，吸球、射球、吐球等机制动作也不会打断或替换预览。
+- 预览用于比较主题与效果，不代表实灯颜色或亮度；屏幕颜色不能用来核验实灯色序、亮度、供电或分段。机器人 `Disabled` 时预览仍可用；`REPLAY` 不发布这些预览话题，因此回放不会填充此页。
+
 ## 构建与仿真
 
 ```bash

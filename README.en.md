@@ -67,6 +67,14 @@ Automatic jam clearing keeps its existing threshold, confirmation, reverse outpu
 
 The immediate-feed and post-unjam behavior, and the panel, are not yet verified on the real robot.
 
+## Elastic LED preview
+
+The `LED Preview` tab in `elastic-layout-1025.json` provides color and animation previews independently of real-strip output. To use it, robot code or desktop simulation must be running and Elastic must be connected to that process's NetworkTables; opening the layout alone does not produce preview data.
+
+- The top `LED Pattern` and `LED Idle Effect` controls use the existing setting keys. The large `Current Selection` card previews the selected Pattern (theme Patterns also use the selected Idle Effect); the five fixed cards below show Marigold Bridge / Slow Flow, Festival Night / Breathe, Papel Fiesta / Chase, Alebrije Glow / Slow Flow, and Candle Memory / Static, pairing each theme with its recommended effect.
+- Every card is rendered at a fixed reference brightness and does not read or display real-strip state or actual brightness. `LED Brightness (%)` does not scale the previews, and mechanism actions such as intake, shooting, and eject do not interrupt or replace them.
+- These previews compare themes and effects; they do not represent real-strip color or brightness. Screen colors cannot verify physical color order, brightness, power, or section mapping. Previews continue while the robot is `Disabled`; `REPLAY` does not publish these preview topics, so replay does not populate this tab.
+
 ## Build & simulation
 
 ```bash
