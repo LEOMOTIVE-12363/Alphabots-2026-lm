@@ -64,8 +64,9 @@ colors, which the robot can republish at a bounded rate to animate.
 
 - Selecting a theme still auto-recommends its idle effect and the operator can
   override it; the large card reflects the override, the fixed cards do not.
-- The two `Multi Color View` cards under `/SmartDashboard/LED Preview` and the
-  tab are the only new external interfaces; `TeleopIntegrationTest`'s demo-tab
+- The six `Multi Color View` cards under `/SmartDashboard/LED Preview/` (one
+  current-selection card plus five fixed theme cards) and the tab are the only
+  new external interfaces; `TeleopIntegrationTest`'s demo-tab
   contract is unchanged because the preview widgets live on the new tab.
 - Screen previews require the robot program or a simulation running and
   Elastic connected to its NetworkTables; opening the layout file alone shows
