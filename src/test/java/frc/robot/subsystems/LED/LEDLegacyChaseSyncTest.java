@@ -18,6 +18,8 @@ import org.junit.jupiter.api.Test;
  * own (8+6)/20 = 0.7 s cycle while the 200-px strip cycled in 10.3 s, so the two never stayed in
  * phase. These tests pin the shared lap across lengths, instants and wraparound, the single
  * brightness scaling, and that the Elastic preview (full-length render) follows the same lap.
+ * Thumbnail u positions map onto the external strip's actual pixel span 0..REFERENCE-1 (fourth
+ * acceptance round, 2026-10-26: u=1 previously pointed one pixel past the final external pixel).
  *
  * <p>The theme idle effect "Chase" (IdleEffect.CHASE) is a different animation and is not touched.
  */
@@ -68,9 +70,10 @@ class LEDLegacyChaseSyncTest {
       assertEquals(expectedPixel(100, 0), packed(onboard, 0), "thumbnail head at lap time " + now);
     }
 
-    // When the head reaches the thumbnail's far end (u=1 ⇒ position REFERENCE), thumbnail pixel 7
-    // is the head — the same comet position the external strip shows near its last pixel.
-    double headAtFarEnd = REFERENCE / SPEED; // head = 200 px = u=1 on the reference lap
+    // When the head reaches the thumbnail's far end (u=1 ⇒ position REFERENCE - 1, the external
+    // strip's actual final pixel), thumbnail pixel 7 is the head. (Fourth acceptance round
+    // 2026-10-26: u=1 previously mapped to the nonexistent pixel REFERENCE, one past the end.)
+    double headAtFarEnd = (REFERENCE - 1) / SPEED;
     AddressableLEDBuffer onboard = render(THUMBNAIL, headAtFarEnd, 100);
     assertEquals(
         expectedPixel(100, 0), packed(onboard, THUMBNAIL - 1), "thumbnail far end at the head");
@@ -96,10 +99,12 @@ class LEDLegacyChaseSyncTest {
   void multipleThumbnailLengthsShareTheReferenceLap() {
     double now = 3.21; // arbitrary instant; head lands mid-lap
     double head = (now * SPEED) % (REFERENCE + TAIL);
-    for (int length : new int[] {4, THUMBNAIL, 16, 64, REFERENCE}) {
+    for (int length : new int[] {1, 4, THUMBNAIL, 16, 64, REFERENCE}) {
       AddressableLEDBuffer buffer = render(length, now, 100);
       for (int i = 0; i < length; i++) {
-        double position = length == REFERENCE ? i : (double) i / (length - 1) * REFERENCE;
+        // Thumbnail u spans the external strip's actual pixel endpoints 0..REFERENCE-1; a
+        // single-pixel target sits at u=0 (position 0) by the length<=1 convention.
+        double position = length == REFERENCE ? i : normalizedPosition(i, length) * (REFERENCE - 1);
         assertEquals(
             expectedPixel(100, head - position),
             packed(buffer, i),
@@ -108,11 +113,15 @@ class LEDLegacyChaseSyncTest {
     }
   }
 
+  private static double normalizedPosition(int i, int length) {
+    return length <= 1 ? 0.0 : (double) i / (length - 1);
+  }
+
   @Test
   void brightnessScalesTheSharedThumbnailExactlyOnce() {
     // At the head the value channel is the full brightness scale, so successive single scalings
     // are observable directly: 255 → 127 → 63; a second scaling would collapse 50% onto 63.
-    double headAtFarEnd = REFERENCE / SPEED;
+    double headAtFarEnd = (REFERENCE - 1) / SPEED; // head on the actual final pixel (u=1)
     assertEquals(
         expectedPixel(100, 0), packed(render(THUMBNAIL, headAtFarEnd, 100), THUMBNAIL - 1));
     assertEquals(expectedPixel(50, 0), packed(render(THUMBNAIL, headAtFarEnd, 50), THUMBNAIL - 1));

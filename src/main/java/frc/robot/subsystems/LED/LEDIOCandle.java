@@ -401,13 +401,18 @@ public class LEDIOCandle implements LEDIO, AutoCloseable {
 
   /**
    * Hands a config task to the worker (at most one in flight; never queues a second). Submission
-   * itself is non-blocking, so calling from the loop thread is safe.
+   * itself is non-blocking, so calling from the loop thread is safe. Every ACCEPTED task stamps the
+   * shared attempt clock ({@code lastInitAttemptSec}) — first init, reset re-init, keepalive and
+   * the failure-retry path therefore obey one consistent 2 s rate limit, and a task rejected
+   * because another is pending (or the driver is closed) never refreshes it, so retries cannot be
+   * postponed forever either.
    */
   private void submitConfigTask(boolean fullInit, double now) {
     synchronized (stateLock) {
       if (closed || configTaskPending) {
         return;
       }
+      lastInitAttemptSec = now;
       configTaskPending = true;
       lastConfigFuture = CONFIG_EXECUTOR.submit(() -> runConfigTask(fullInit, now));
     }
@@ -417,14 +422,15 @@ public class LEDIOCandle implements LEDIO, AutoCloseable {
    * Bounded-recovery decisions, made on the loop thread's clock every tick: retry a failed
    * initialization (only while the device answers, at most once per init-retry interval), re-apply
    * the config after a detected device reset, and periodically re-apply the config as a keepalive
-   * for resets that raise no signal. The blocking device work itself runs on the worker.
+   * for resets that raise no signal. The attempt clock is stamped where the task is accepted (see
+   * {@link #submitConfigTask}), so a failed reset/keepalive config is retried only after the full
+   * interval — not on the very next loop. The blocking device work runs on the worker.
    */
   private void maintenance(double now) {
     if (!initSucceeded) {
       if (now - lastInitAttemptSec >= LEDConstants.CANDLE_INIT_RETRY_INTERVAL_SEC
           && !configTaskPending
           && transport.isDeviceResponsive()) {
-        lastInitAttemptSec = now;
         submitConfigTask(FULL_INIT, now);
       }
     } else if (now - lastResetInitSec >= LEDConstants.CANDLE_REFRESH_INTERVAL_SEC
