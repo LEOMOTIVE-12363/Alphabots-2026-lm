@@ -47,10 +47,12 @@ public final class LEDConstants {
   // plugged into. Placeholder until then.
   public static final int PWM_PORT = 0;
 
-  // TODO(strip color order): WS2811 strips vary in R/G channel order; flip to true if theme colors
-  // look red/green-swapped on the real strip. Both drivers consume this flag exactly once — the
-  // PWM driver software-swaps the channels, the CANdle driver configures GRB strip type instead —
-  // and it applies to every pattern, legacy effects included.
+  // TODO(strip color order): WS2811 strips vary in R/G channel order. Contract (2026-10-25, third
+  // acceptance round): true ⇔ the installed strip orders its channels GRB (classic WS2811); false
+  // ⇔ RGB. Verify on the real strip — if pure red renders as green, flip this flag. Both drivers
+  // consume it identically: the PWM driver configures the HAL color order (GRB/RGB) and copies
+  // logical RGB through; the CANdle driver configures StripType GRB/RGB. Switching HARDWARE alone
+  // never changes the wire channel order. It applies to every pattern, legacy effects included.
   public static final boolean SWAP_RED_GREEN_FOR_WS2811 = false;
 
   // ---- CANdle driver (used only when HARDWARE = CANDLE) --------------------------------------

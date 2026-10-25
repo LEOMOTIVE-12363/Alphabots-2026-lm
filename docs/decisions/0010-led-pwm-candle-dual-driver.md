@@ -232,3 +232,75 @@ references to ball-flow direction/state in onboard rendering, are superseded by
 The hardware driver, installation, persistence mechanism, and
 bounded-send/recovery decisions are unchanged; 0012 defines the current visual
 and diagnostic semantics.
+
+## Revision 9 (2026-10-25, third acceptance round: non-blocking config, unified color order, shared Chase lap)
+
+Codex's third independent acceptance round (baseline demo `50828e9`) found
+three driver defects; all three are fixed here and the round-1/2/3 independent
+tests are kept as regressions. None of the earlier revisions' visual semantics
+(0012 dashboard-only output, Revision 4/7 onboard logical thumbnail) changes.
+
+1. **Blocking configuration (P1).** Every blocking device call — the 0.1 s
+   configurator apply, animation cleanup, init onboard dimming — moved off the
+   robot's periodic thread onto a shared single-thread daemon worker
+   (`LED-CANdle-config`). The loop thread only makes rate-limited decisions on
+   its own clock (init retry every 2 s while the device answers, reset-flag
+   re-init, 2 s keepalive) and hands the work to that worker; at most one
+   config task is in flight (no stale-task queue). Config and paints serialize
+   through a hardware lock: the worker holds it for the whole config pass, the
+   loop only `tryLock`s — while a config owns the device the tick sends nothing
+   and the dirty state survives to the next tick. Success is recorded only
+   after the task truly completes, and the confirmation cache is invalidated
+   after every completed pass (success or failure — the display is suspect
+   either way), so the latest frame always repaints under the normal budget.
+   Startup failure retry, reset recovery, no-signal keepalive, throttling and
+   fault-log rate limits are all preserved. Construction still configures
+   synchronously once (bounded boot cost, same as before). Independent
+   evidence: 100 ms injected config latency previously measured 101–105 ms
+   inside `writeBuffer`; after the fix the same injection keeps the periodic
+   write under 20 ms (`LEDThirdAcceptanceTest`, ported verbatim, plus the
+   in-suite twins covering deferred sends during an in-flight config and the
+   failure-then-retry path).
+
+2. **Unified physical color-order contract (P2).** Verified against the
+   project's own WPILib 2026.2.1 HAL sources: the roboRIO FPGA natively
+   outputs GRB, `AddressableLED` defaults to GRB and converts exactly once for
+   any other configured order (`setColorOrder`, added in 2026; sim HAL no-op).
+   The old PWM driver relied on the GRB default plus a software R/G swap at
+   the opposite polarity from the CANdle's `StripType` mapping, so the two
+   drivers wired opposite channel orders at the same flag value. The contract
+   is now one statement — `SWAP_RED_GREEN_FOR_WS2811 == true` ⇔ the strip's
+   physical channel order is GRB (classic WS2811) — implemented by the PWM
+   driver explicitly setting the HAL color order (GRB/RGB, never the default)
+   with a logical-RGB identity copy, and by the CANdle driver's existing
+   `StripType` GRB/RGB mapping; the conversion happens exactly once, in
+   hardware, in both drivers. `LEDColorOrderContractTest` derives the wire
+   channel sequence of both drivers through their real entry points for pure
+   red/green/blue at both flag values. The constant's value stays `false`
+   (= RGB-ordered strip) so the deployed CANdle configuration is byte-identical
+   to before; the actual strip order remains an install-time TODO to verify
+   (flip the flag if pure red renders as green).
+
+3. **Shared legacy-Chase lap (P2).** The base `LED Pattern = Chase` previously
+   derived its lap from the target buffer's own length, so the 8-px onboard
+   thumbnail cycled in (8+6)/20 = 0.7 s while the 200-px strip cycled in
+   10.3 s — same-clock, different phase, violating the shared-phase thumbnail
+   contract. `renderLegacyInto` now defines the lap from the configured
+   external length (`LEDConstants.LENGTH_PIXELS` + tail): a reference-length
+   target (the strip render and the preview's full-length legacy buffer) keeps
+   the exact original per-pixel math, and any other length (the thumbnail)
+   samples the same head position at normalized u positions, like the theme
+   thumbnail. The theme idle effect "Chase" (`IdleEffect.CHASE`) is a different
+   animation and is untouched. Regressions: `LEDThirdAcceptanceTest` (verbatim)
+   plus `LEDLegacyChaseSyncTest` (lap/phase/wraparound across lengths, single
+   brightness scaling, preview periodicity).
+
+Verification (local, no real strip/CAN): full offline build 27 suites /
+312 tests / 0 failures/errors/skipped (baseline 290 + 22 new); bounded
+PWM- and CANDLE-configuration `simulateJava` smokes each reached robot-program
+startup complete with zero exceptions and zero loop-overrun warnings in the
+window (the CANdle sim still uses the `none()` stub — real-bus latency is
+covered only by the injected-latency tests). The round-2 recovery tests were
+ported with an async-preserving adaptation (await the worker, then drive a few
+ticks — assertion strength unchanged) because recovery now runs on the
+background worker by design.
