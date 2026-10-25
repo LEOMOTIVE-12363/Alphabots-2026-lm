@@ -13,6 +13,8 @@ import edu.wpi.first.wpilibj.AddressableLEDBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.DoubleSupplier;
 import org.junit.jupiter.api.Test;
 
@@ -21,12 +23,14 @@ import org.junit.jupiter.api.Test;
  * the driver issues, NOT real CAN communication). They pin the onboard/external index split, the
  * onboard logical thumbnail (driver displays exactly the render layer's colors — never a re-sample
  * of the physical strip), the per-pixel confirmation bounded-send strategy, the bounded recovery
- * model (init retry, reset re-config, keepalive refresh), the strip-type color-order handling, and
- * the never-throw fault isolation.
+ * model (init retry, reset re-config, keepalive refresh — executed on the background config worker
+ * since the 2026-10-25 third acceptance round, hence the {@code awaitConfigWork()} barriers), the
+ * strip-type color-order handling, and the never-throw fault isolation.
  *
  * <p>The acceptance-prefixed tests are ported from Codex's independent acceptance rounds of
  * 2026-10-24 (three cache defects, then two recovery defects) with their intent and assertion
- * strength kept.
+ * strength kept; recovery assertions wait for the background worker and then drive a few more
+ * ticks, which is the async-preserving form of the original synchronous assertions.
  */
 class LEDIOCandleTest {
   private static final int PIXELS = 10;
@@ -56,8 +60,23 @@ class LEDIOCandleTest {
     int failFromDeviceIndex = Integer.MAX_VALUE;
     int failUntilDeviceIndex = Integer.MAX_VALUE;
 
+    /** When set, configureStrip signals {@link #configureStarted} and parks until released. */
+    CountDownLatch configureGate;
+
+    CountDownLatch configureStarted;
+
     @Override
     public StatusCode configureStrip(StripTypeValue stripType) {
+      if (configureStarted != null) {
+        configureStarted.countDown();
+      }
+      if (configureGate != null) {
+        try {
+          configureGate.await();
+        } catch (InterruptedException e) {
+          Thread.currentThread().interrupt();
+        }
+      }
       configCalls++;
       if (!ready || statusToReturn != StatusCode.OK) {
         return StatusCode.NoDevicesOnBus;
@@ -519,6 +538,7 @@ class LEDIOCandleTest {
       time[0] += 0.06;
       io.writeBuffer(frame);
     }
+    io.awaitConfigWork();
     assertTrue(
         transport.configSuccesses >= 1,
         "Device startup failure must not leave essential power/color config permanently unapplied");
@@ -535,6 +555,11 @@ class LEDIOCandleTest {
     assertEquals(100 << 16, transport.displayed[8]);
     transport.resetDevice(); // device power-cycle behind the driver's back: display wiped
     for (int i = 0; i < 200; i++) {
+      time[0] += 0.06;
+      io.writeBuffer(frame);
+    }
+    io.awaitConfigWork();
+    for (int i = 0; i < 3; i++) {
       time[0] += 0.06;
       io.writeBuffer(frame);
     }
@@ -556,6 +581,7 @@ class LEDIOCandleTest {
 
     clock.now += REFRESH_SEC + STEP_SEC;
     io.writeBuffer(frame);
+    io.awaitConfigWork(); // the reset reinitialization runs on the background config worker
     assertEquals(1, transport.configSuccesses, "sanity: reset reinitialization failed");
 
     transport.statusToReturn = StatusCode.OK;
@@ -563,6 +589,7 @@ class LEDIOCandleTest {
       clock.now += STEP_SEC;
       io.writeBuffer(frame);
     }
+    io.awaitConfigWork();
 
     assertTrue(
         transport.configSuccesses >= 2,
@@ -582,6 +609,11 @@ class LEDIOCandleTest {
     transport.resetPending = false; // no reset signal reaches the driver
 
     for (int i = 0; i < 200; i++) {
+      clock.now += STEP_SEC;
+      io.writeBuffer(frame);
+    }
+    io.awaitConfigWork();
+    for (int i = 0; i < 3; i++) {
       clock.now += STEP_SEC;
       io.writeBuffer(frame);
     }
@@ -669,6 +701,11 @@ class LEDIOCandleTest {
       clock.now += STEP_SEC;
       io.writeBuffer(latest);
     }
+    io.awaitConfigWork();
+    for (int i = 0; i < 3; i++) {
+      clock.now += STEP_SEC;
+      io.writeBuffer(latest);
+    }
 
     assertTrue(
         transport.configCalls > configCallsBefore,
@@ -696,6 +733,12 @@ class LEDIOCandleTest {
       io.writeOnboardBuffer(thumbnailBuffer());
       io.writeBuffer(gradient);
     }
+    io.awaitConfigWork();
+    for (int i = 0; i < 10; i++) { // ceil(68 runs / 10 frames) ticks to fully repaint
+      clock.now += STEP_SEC;
+      io.writeOnboardBuffer(thumbnailBuffer());
+      io.writeBuffer(gradient);
+    }
     for (int i = 0; i < 60; i++) {
       assertEquals(packed(gradient, i), transport.displayed[i + 8], "external pixel " + i);
     }
@@ -719,6 +762,11 @@ class LEDIOCandleTest {
       clock.now += STEP_SEC;
       io.writeBuffer(frame);
     }
+    io.awaitConfigWork();
+    for (int i = 0; i < 3; i++) {
+      clock.now += STEP_SEC;
+      io.writeBuffer(frame); // the keepalive's invalidation repaints the static frame
+    }
 
     assertTrue(
         transport.configCalls > configCallsAfterBoot,
@@ -732,6 +780,125 @@ class LEDIOCandleTest {
         keepalivePaints <= 2 * Math.ceil(12.0 / REFRESH_SEC) + 2,
         "keepalive traffic must stay bounded (a couple of frames per refresh window), got "
             + keepalivePaints);
+  }
+
+  // ---- Non-blocking configuration (third acceptance round, 2026-10-25) ------------------------
+
+  /**
+   * In-suite twin of the independent timing test: a slow config apply must never stall the loop.
+   */
+  @Test
+  void configLatencyNeverStallsThePeriodicWrite() throws InterruptedException {
+    FakeTransport transport = new FakeTransport();
+    Clock clock = new Clock();
+    LEDIOCandle io = driver(transport, clock, PIXELS, 64);
+    io.writeBuffer(bufferWithColor(PIXELS, 9, 9, 9)); // settle, so the measured tick only decides
+
+    // The next keepalive's configureStrip parks on the worker until released (a busy CAN bus).
+    transport.configureGate = new CountDownLatch(1);
+    transport.configureStarted = new CountDownLatch(1);
+    clock.now += REFRESH_SEC + STEP_SEC; // keepalive config becomes due
+    long start = System.nanoTime();
+    io.writeBuffer(bufferWithColor(PIXELS, 9, 9, 9));
+    double elapsedMs = (System.nanoTime() - start) / 1e6;
+    assertTrue(
+        elapsedMs < 20.0,
+        "CAN configuration latency must not stall the 20 ms robot loop: " + elapsedMs + " ms");
+
+    transport.configureGate.countDown();
+    io.awaitConfigWork();
+  }
+
+  @Test
+  void sendsAreDeferredWhileAConfigTaskOwnsTheDevice() throws Exception {
+    FakeTransport transport = new FakeTransport();
+    Clock clock = new Clock();
+    LEDIOCandle io = driver(transport, clock, PIXELS, 64);
+    io.writeBuffer(bufferWithColor(PIXELS, 10, 0, 0));
+    transport.configureGate = new CountDownLatch(1);
+    transport.configureStarted = new CountDownLatch(1);
+
+    clock.now += REFRESH_SEC + STEP_SEC; // keepalive due: config task handed to the worker
+    io.writeBuffer(bufferWithColor(PIXELS, 10, 0, 0));
+    assertTrue(
+        transport.configureStarted.await(5, TimeUnit.SECONDS),
+        "the config task must actually reach the device");
+
+    // The worker now owns the device (parked inside configureStrip under the hardware lock): a
+    // dirty frame must neither block the loop nor race its paints against the config.
+    clock.now += STEP_SEC;
+    int paintsBefore = transport.paints.size();
+    long start = System.nanoTime();
+    io.writeBuffer(bufferWithColor(PIXELS, 0, 0, 200));
+    double elapsedMs = (System.nanoTime() - start) / 1e6;
+    assertTrue(elapsedMs < 20.0, "the loop must not wait for an in-flight config task");
+    assertEquals(
+        paintsBefore, transport.paints.size(), "no paints may run concurrently with the config");
+
+    transport.configureGate.countDown();
+    io.awaitConfigWork();
+    for (int i = 0; i < 3; i++) {
+      clock.now += STEP_SEC;
+      io.writeBuffer(bufferWithColor(PIXELS, 0, 0, 200));
+    }
+    for (int i = 0; i < PIXELS; i++) {
+      assertEquals(
+          200,
+          transport.displayed[i + 8],
+          "external pixel " + i + " must catch up after the config");
+    }
+  }
+
+  @Test
+  void failedKeepaliveConfigRetriesAndRestoresTheLatestFrame() {
+    FakeTransport transport = new FakeTransport();
+    Clock clock = new Clock();
+    LEDIOCandle io = driver(transport, clock, PIXELS, 64);
+    AddressableLEDBuffer frame = bufferWithColor(PIXELS, 100, 0, 0);
+    io.writeBuffer(frame);
+    int successesAfterBoot = transport.configSuccesses; // the construction-time config
+
+    clock.now += REFRESH_SEC + STEP_SEC; // keepalive due
+    transport.statusToReturn = StatusCode.NoDevicesOnBus; // ... and the config fails
+    io.writeBuffer(frame);
+    io.awaitConfigWork();
+    // The failed keepalive must not be cached as success: the driver becomes uninitialized.
+    assertEquals(successesAfterBoot, transport.configSuccesses);
+
+    transport.statusToReturn = StatusCode.OK;
+    for (int i = 0; i < 200; i++) { // the bounded init-retry path takes over (device responsive)
+      clock.now += STEP_SEC;
+      io.writeBuffer(frame);
+    }
+    io.awaitConfigWork();
+    for (int i = 0; i < 3; i++) {
+      clock.now += STEP_SEC;
+      io.writeBuffer(frame);
+    }
+    assertTrue(transport.configSuccesses > successesAfterBoot, "the failed config must be retried");
+    assertEquals(StripTypeValue.RGB, transport.configuredStripType);
+    assertEquals(100 << 16, transport.displayed[8]);
+  }
+
+  @Test
+  void closeStopsNewConfigTasksAndDrainsTheWorker() {
+    FakeTransport transport = new FakeTransport();
+    Clock clock = new Clock();
+    LEDIOCandle io = driver(transport, clock, PIXELS, 64);
+    io.writeBuffer(bufferWithColor(PIXELS, 1, 2, 3));
+    io.close();
+    int configCallsAfterClose = transport.configCalls;
+
+    clock.now += 3 * REFRESH_SEC; // keepalives would be due, but the driver is closed
+    for (int i = 0; i < 10; i++) {
+      clock.now += STEP_SEC;
+      io.writeBuffer(bufferWithColor(PIXELS, 4, 5, 6));
+    }
+    io.awaitConfigWork();
+    assertEquals(
+        configCallsAfterClose,
+        transport.configCalls,
+        "a closed driver must not submit new config work");
   }
 
   // ---- Onboard logical thumbnail (driver side) ------------------------------------------------

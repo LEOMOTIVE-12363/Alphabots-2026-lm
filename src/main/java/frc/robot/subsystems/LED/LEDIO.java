@@ -6,8 +6,10 @@ import frc.robot.Constants;
 /**
  * Hardware abstraction for the addressable LED strip. Buffers handed to {@link #writeBuffer} hold
  * logical RGB with global brightness already applied by the render layer; each implementation
- * converts to the physical strip channel order exactly once (PWM: software R/G swap; CANdle:
- * strip-type config) and must not scale brightness again.
+ * configures its platform's physical channel order from the shared {@code
+ * LEDConstants.SWAP_RED_GREEN_FOR_WS2811} contract (true = GRB strip) so the conversion happens
+ * exactly once in hardware — the PWM driver sets the HAL color order, the CANdle driver sets the
+ * strip type — and must not scale brightness again.
  *
  * <p>The empty implementation is used in replay so logged runs stay deterministic (no hardware
  * output, no NetworkTables, no settings-file writes).

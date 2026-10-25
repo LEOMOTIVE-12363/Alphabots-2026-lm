@@ -386,11 +386,37 @@ public class LED extends SubsystemBase {
     renderLegacyInto(onboardBuffer, pattern, now, brightnessPercent);
   }
 
-  /** Package-private static sibling of {@link #renderLegacyPattern} for direct testing. */
+  /**
+   * Package-private static sibling of {@link #renderLegacyPattern} for direct testing. The Chase
+   * lap is defined by the configured external strip length (see {@link #renderLegacyInto(
+   * AddressableLEDBuffer, LEDPattern, double, double, int)}), so a short target such as the onboard
+   * thumbnail shares the external cycle instead of running its own much faster one.
+   */
   static void renderLegacyInto(
       AddressableLEDBuffer target, LEDPattern pattern, double now, double brightnessPercent) {
+    renderLegacyInto(target, pattern, now, brightnessPercent, LEDConstants.LENGTH_PIXELS);
+  }
+
+  /**
+   * The legacy effects with their original per-pattern math. For Chase, one lap spans {@code
+   * referenceLengthPixels + tail} and every target — the external strip AND the onboard thumbnail —
+   * advances through that same lap with the same head position (third acceptance round, 2026-10-25:
+   * per-target laps made the 8-px thumbnail cycle 14.7× faster than the 200-px strip, breaking the
+   * shared-phase thumbnail contract). A target whose length equals the reference (the external
+   * strip render, and the Elastic preview's full-length legacy buffer) keeps the exact original
+   * per-pixel math; any other length (the thumbnail) renders at normalized u positions mapped onto
+   * the reference lap, matching how the theme thumbnail samples the shared render — so the onboard
+   * direction never depends on the external wiring either.
+   */
+  static void renderLegacyInto(
+      AddressableLEDBuffer target,
+      LEDPattern pattern,
+      double now,
+      double brightnessPercent,
+      int referenceLengthPixels) {
     double scale = brightnessPercent / 100.0 * MAX_VALUE;
     int length = target.getLength();
+    int referenceLength = Math.max(referenceLengthPixels, 1);
 
     switch (pattern) {
       case OFF -> {
@@ -410,12 +436,14 @@ public class LED extends SubsystemBase {
         }
       }
       case CHASE -> {
-        // Comet with CHASE_TAIL_PIXELS fade trailing its head, wrapping around the strip.
-        double head =
-            (now * LEDConstants.CHASE_SPEED_PIXELS_PER_SEC)
-                % (length + LEDConstants.CHASE_TAIL_PIXELS);
+        // Comet with CHASE_TAIL_PIXELS fade trailing its head, wrapping around the reference lap.
+        double lap = referenceLength + LEDConstants.CHASE_TAIL_PIXELS;
+        double head = (now * LEDConstants.CHASE_SPEED_PIXELS_PER_SEC) % lap;
+        boolean isReferenceRender = length == referenceLength;
         for (int i = 0; i < length; i++) {
-          double distanceBehindHead = head - i;
+          double position =
+              isReferenceRender ? i : normalizedThumbnailPosition(i, length) * referenceLength;
+          double distanceBehindHead = head - position;
           int value = 0;
           if (distanceBehindHead >= 0 && distanceBehindHead < LEDConstants.CHASE_TAIL_PIXELS) {
             value = (int) (scale * (1.0 - distanceBehindHead / LEDConstants.CHASE_TAIL_PIXELS));
@@ -436,6 +464,15 @@ public class LED extends SubsystemBase {
         // Theme patterns never reach this method.
       }
     }
+  }
+
+  /**
+   * Normalized [0, 1] position of pixel {@code i} in a non-reference-length target — the same
+   * section-u convention the theme thumbnail uses ({@link LEDSection#uForPixel}: first pixel u=0,
+   * last u=1).
+   */
+  private static double normalizedThumbnailPosition(int i, int length) {
+    return length <= 1 ? 0.0 : (double) i / (length - 1);
   }
 
   /**
