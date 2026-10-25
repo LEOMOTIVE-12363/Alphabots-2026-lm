@@ -22,14 +22,14 @@ The following capabilities come from the upstream competition code retained on `
 - **Vision** — Limelight (MegaTag2) global pose estimation fused into swerve odometry
 - **AdvantageKit three-mode architecture** — REAL / SIM / REPLAY share one codebase, with deterministic log replay
 - **maple-sim desktop simulation** — 2026 REBUILT arena (HUB / Trench collision geometry) physics sim
-- **Custom Elastic dashboard** — layout versioned in `elastic-layout-1024.json`, plus NetworkTables tuning scripts `scripts/nt_tune.py` / `scripts/pid_analysis.py`
+- **Custom Elastic dashboard** — layout versioned in `elastic-layout-1025.json`, plus NetworkTables tuning scripts `scripts/nt_tune.py` / `scripts/pid_analysis.py`
 
 ## Branch model
 
 | Branch | Contents |
 |---|---|
 | `main` | Upstream Alphabots 8810 competition-code baseline, retaining this fork's MIT LICENSE, bilingual README, and private-config untracking changes: full autonomous (Choreo trajectories + PathPlanner), vision, tactical commands |
-| `demo` | **LEOMOTIVE demo line** (day-to-day development of this fork): all autonomous programs and vision removed, teleop-only; Elastic numeric input fields directly control Drum speed / Hood angle, plus a dedicated demo tuning tab; addressable LED strip (five Día de los Muertos themes + ball-flow effects for intake/shoot/eject; theme, idle effect and brightness switchable from Elastic and power-cycle persistent; strip section map and animation numbers pending real-strip verification; CANdle is selected as the default driver, with PWM retained as a compile-time fallback; switching is the single `LEDConstants.HARDWARE` constant, while install parameters and real-strip behavior remain to be verified) |
+| `demo` | **LEOMOTIVE demo line** (day-to-day development of this fork): all autonomous programs and vision removed, teleop-only; Elastic numeric input fields directly control Drum speed / Hood angle, plus a dedicated demo tuning tab; addressable LED strip (five Día de los Muertos themes; `LED Pattern` / `LED Idle Effect` / `LED Brightness (%)` are selected in Elastic and power-cycle persistent; the same selected appearance remains in Enable, Disable, idle, intake, shooting, and eject states, while user-selected animations such as Slow Flow / Chase / Breathe continue to play over time; the `Follow Ball Flow` toggle has been removed; strip section map and animation numbers pending real-strip verification; CANdle is selected as the default driver, with PWM retained as a compile-time fallback; switching is the single `LEDConstants.HARDWARE` constant, while install parameters and real-strip behavior remain to be verified) |
 
 - Demo-line feature changes are **never merged into `main`**; each task lands as its own PR with base `demo`, merged after self-checks pass. The shared Chinese and English READMEs are kept in sync: documentation changes originate on `demo`, then the same text is mirrored to `main` through a separate PR.
 - To inspect the full `demo`-vs-`main` diff, use GitHub Compare: [compare/main...demo](https://github.com/LEOMOTIVE-12363/Alphabots-2026-lm/compare/main...demo) (the former standing-overview PR #2 was closed on 2026-10-23; no open PR is kept for this).
@@ -85,7 +85,7 @@ The repository includes a GitHub Actions workflow configured to run `./gradlew b
 - `frc.robot.subsystems` — singleton pattern (`public static final mInstance` per subsystem), `X.java` + `XConstants.java` pairs (CAN IDs, gains, sim config).
 - `frc.robot.commands` — one folder per command, each with its own `*Constants.java`.
 - Runtime mode switches on `Constants.currentMode` (REAL / SIM / REPLAY); each subsystem picks its IO implementation accordingly.
-- `elastic-layout-1024.json` — Elastic dashboard layout, kept in sync with the NetworkTables interfaces in code.
+- `elastic-layout-1025.json` — Elastic dashboard layout, kept in sync with the NetworkTables interfaces in code.
 
 ## Development workflow & decision records
 
