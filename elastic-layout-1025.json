@@ -638,7 +638,7 @@
             }
           },
           {
-            "title": "Marigold Bridge — Recommended: Slow Flow",
+            "title": "Marigold Bridge — Slow Flow",
             "x": 0.0,
             "y": 384.0,
             "width": 256.0,
@@ -651,7 +651,7 @@
             }
           },
           {
-            "title": "Festival Night — Recommended: Breathe",
+            "title": "Festival Night — Breathe",
             "x": 256.0,
             "y": 384.0,
             "width": 256.0,
@@ -664,7 +664,7 @@
             }
           },
           {
-            "title": "Papel Fiesta — Recommended: Chase",
+            "title": "Papel Fiesta — Chase",
             "x": 512.0,
             "y": 384.0,
             "width": 256.0,
@@ -677,7 +677,7 @@
             }
           },
           {
-            "title": "Alebrije Glow — Recommended: Slow Flow",
+            "title": "Alebrije Glow — Slow Flow",
             "x": 768.0,
             "y": 384.0,
             "width": 256.0,
@@ -690,7 +690,7 @@
             }
           },
           {
-            "title": "Candle Memory — Recommended: Static",
+            "title": "Candle Memory — Static",
             "x": 1024.0,
             "y": 384.0,
             "width": 256.0,

@@ -195,7 +195,7 @@ class LEDPreviewLayoutTest {
     for (ThemeCard card : THEME_CARDS) {
       assertEquals(
           card.theme().getDashboardName()
-              + " — Recommended: "
+              + " — "
               + card.theme().getRecommendedEffect().getDashboardName(),
           widgetByTopic(preview, topic(card)).path("title").asText());
     }
