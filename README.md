@@ -22,7 +22,7 @@
 - **视觉** — Limelight（MegaTag2）全局位姿估计，融入 swerve 里程计
 - **AdvantageKit 三模式** — REAL / SIM / REPLAY 共用一套代码，日志可确定性回放
 - **maple-sim 桌面仿真** — 2026 REBUILT 场地（含 HUB / Trench 碰撞体）物理仿真
-- **Elastic 自定义仪表盘** — 布局版本化于 `elastic-layout-1024.json`；配套 NetworkTables 调参脚本 `scripts/nt_tune.py`、`scripts/pid_analysis.py`
+- **Elastic 自定义仪表盘** — 布局版本化于 `elastic-layout-1025.json`；配套 NetworkTables 调参脚本 `scripts/nt_tune.py`、`scripts/pid_analysis.py`
 
 ## 分支模型
 
@@ -64,6 +64,14 @@ LT 同时展开 intake 并吸球，松开后停止吸球但不自动收回。方
 
 以上立即送料、清堵恢复行为与面板尚未在实车上验证。
 
+## Elastic LED 预览
+
+`elastic-layout-1025.json` 的 `LED Preview` 页提供独立于实灯输出的配色与动画预览。使用时必须正在运行机器人代码或桌面仿真，并将 Elastic 连接到该进程的 NetworkTables；仅打开布局不会产生预览数据。
+
+- 顶部 `LED Pattern` 与 `LED Idle Effect` 沿用现有设置键。大的 `Current Selection` 卡片预览当前 Pattern（主题 Pattern 使用当前 Idle Effect）；下方五张固定卡片分别展示 Marigold Bridge / Slow Flow、Festival Night / Breathe、Papel Fiesta / Chase、Alebrije Glow / Slow Flow、Candle Memory / Static 的主题与推荐效果。
+- 所有卡片按固定参考亮度生成，不读取或显示实灯状态、实际亮度或球路动作；`LED Brightness (%)` 不缩放预览，吸球、发球、吐球等 ball-flow 动作也不会打断或替换预览。
+- 预览用于比较主题与效果，不代表实灯颜色或亮度；屏幕颜色不能用来核验实灯色序、亮度、供电或分段。机器人 `Disabled` 时预览仍可用；`REPLAY` 不发布这些预览话题，因此回放不会填充此页。
+
 ## 构建与仿真
 
 ```bash
@@ -82,7 +90,7 @@ LT 同时展开 intake 并吸球，松开后停止吸球但不自动收回。方
 - `frc.robot.subsystems` — 单例模式（每个子系统 `public static final mInstance`），`X.java` + `XConstants.java` 成对（CAN ID、增益、仿真配置）。
 - `frc.robot.commands` — 每个命令独立目录，各带 `*Constants.java`。
 - 三种运行模式由 `Constants.currentMode`（REAL / SIM / REPLAY）切换，各子系统按模式选择 IO 实现。
-- `elastic-layout-1024.json` — Elastic 仪表盘布局，与代码内 NetworkTables 接口同步维护。
+- `elastic-layout-1025.json` — Elastic 仪表盘布局，与代码内 NetworkTables 接口同步维护。
 
 ## 开发流程与决策记录
 

@@ -609,6 +609,118 @@
           }
         ]
       }
+    },
+    {
+      "name": "LED Preview",
+      "grid_layout": {
+        "layouts": [],
+        "containers": [
+          {
+            "title": "LED Pattern",
+            "x": 0.0,
+            "y": 0.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "ComboBox",
+            "properties": {
+              "topic": "/SmartDashboard/LED Pattern",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "LED Idle Effect",
+            "x": 256.0,
+            "y": 0.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "ComboBox",
+            "properties": {
+              "topic": "/SmartDashboard/LED Idle Effect",
+              "period": 0.06,
+              "data_type": "string"
+            }
+          },
+          {
+            "title": "Current Selection — Preview colors — not real-strip brightness",
+            "x": 0.0,
+            "y": 128.0,
+            "width": 1280.0,
+            "height": 256.0,
+            "type": "Multi Color View",
+            "properties": {
+              "topic": "/SmartDashboard/LED Preview/Current Selection",
+              "period": 0.1,
+              "data_type": "string[]"
+            }
+          },
+          {
+            "title": "Marigold Bridge — Recommended: Slow Flow",
+            "x": 0.0,
+            "y": 384.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "Multi Color View",
+            "properties": {
+              "topic": "/SmartDashboard/LED Preview/Marigold Bridge",
+              "period": 0.1,
+              "data_type": "string[]"
+            }
+          },
+          {
+            "title": "Festival Night — Recommended: Breathe",
+            "x": 256.0,
+            "y": 384.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "Multi Color View",
+            "properties": {
+              "topic": "/SmartDashboard/LED Preview/Festival Night",
+              "period": 0.1,
+              "data_type": "string[]"
+            }
+          },
+          {
+            "title": "Papel Fiesta — Recommended: Chase",
+            "x": 512.0,
+            "y": 384.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "Multi Color View",
+            "properties": {
+              "topic": "/SmartDashboard/LED Preview/Papel Fiesta",
+              "period": 0.1,
+              "data_type": "string[]"
+            }
+          },
+          {
+            "title": "Alebrije Glow — Recommended: Slow Flow",
+            "x": 768.0,
+            "y": 384.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "Multi Color View",
+            "properties": {
+              "topic": "/SmartDashboard/LED Preview/Alebrije Glow",
+              "period": 0.1,
+              "data_type": "string[]"
+            }
+          },
+          {
+            "title": "Candle Memory — Recommended: Static",
+            "x": 1024.0,
+            "y": 384.0,
+            "width": 256.0,
+            "height": 128.0,
+            "type": "Multi Color View",
+            "properties": {
+              "topic": "/SmartDashboard/LED Preview/Candle Memory",
+              "period": 0.1,
+              "data_type": "string[]"
+            }
+          }
+        ]
+      }
     }
   ]
 }
