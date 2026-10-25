@@ -17,8 +17,8 @@ import org.littletonrobotics.junction.networktables.LoggedDashboardChooser;
  * Addressable LED strip. The Elastic "LED Pattern" chooser picks between the five legacy effects
  * and the five Day of the Dead themes; theme patterns render the theme gradient with the
  * independently chosen "LED Idle Effect". The selected style is independent of enable state and
- * mechanism activity. Global brightness comes from the "/Tuning/LED Brightness (%)" slider.
- * Pattern, idle effect, and brightness are power-cycle persistent like the other Elastic settings.
+ * mechanism activity. Global brightness comes from the "/Tuning/LED Brightness (%)" input. Pattern,
+ * idle effect, and brightness are power-cycle persistent like the other Elastic settings.
  *
  * <p>All timing derives from the AdvantageKit log timestamp so replays reproduce the exact output;
  * in replay mode nothing is written to NetworkTables or the settings file.

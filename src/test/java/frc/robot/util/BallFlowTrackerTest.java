@@ -10,10 +10,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * The LED strip displays the mechanism's semantic state, so the tracker's priority and conflict
- * rules are pinned exactly: a clean direction is claimed only when every fresh heartbeat agrees on
- * it, and expiry (no heartbeat for 0.15 s) always falls back to IDLE — no stuck flag can pin the
- * effect forever. An injected clock keeps the timing rules deterministic.
+ * The LED subsystem exposes the mechanism's semantic state as read-only diagnostics, so the
+ * tracker's priority and conflict rules are pinned exactly: a clean direction is claimed only when
+ * every fresh heartbeat agrees on it, and expiry (no heartbeat for 0.15 s) always falls back to
+ * IDLE — no stuck flag can pin the diagnostic state forever. An injected clock keeps the timing
+ * rules deterministic.
  */
 class BallFlowTrackerTest {
   private final double[] now = {0.0};
@@ -88,7 +89,7 @@ class BallFlowTrackerTest {
 
   @Test
   void localReverseAloneStaysIdleWithNote() {
-    // UNJAM reverses only the feeder/indexer; it must never display as a whole-path reverse.
+    // UNJAM reverses only the feeder/indexer; it must never be reported as a whole-path reverse.
     BallFlowTracker.report(FlowKind.LOCAL_REVERSE);
     assertEquals(FlowState.IDLE, BallFlowTracker.effectiveState());
     assertTrue(BallFlowTracker.diagnostic().contains("local reverse"));

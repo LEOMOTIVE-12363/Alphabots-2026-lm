@@ -31,7 +31,9 @@ driver or mechanism-control decisions.
   and other user-selected animated effects continue to play; static selections
   remain static.
 - The `Follow Ball Flow` dashboard toggle is removed. It no longer enables or
-  disables any visual coupling.
+  disables any visual coupling. The LED subsystem no longer reads or writes its
+  old settings key; an entry left in the generic settings file is inert and
+  needs no migration.
 - `LED Effective State` and `LED Flow Direction` remain read-only mechanism
   diagnostics used by the operator panel. They do not describe the actual LED
   effect or direction and must not be interpreted as the current light output.

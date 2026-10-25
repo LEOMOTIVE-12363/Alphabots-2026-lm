@@ -184,7 +184,7 @@ public final class OperatorStatus {
 
   /**
    * Writes the operator panel entries to Elastic; call at 10 Hz. The key names are an external
-   * contract consumed by elastic-layout-1022.json. No-op in replay.
+   * contract consumed by elastic-layout-1025.json. No-op in replay.
    */
   public static void publish(int controllerPort) {
     if (Logger.hasReplaySource()) {
