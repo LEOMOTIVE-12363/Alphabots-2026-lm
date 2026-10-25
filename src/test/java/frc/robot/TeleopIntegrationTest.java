@@ -1352,7 +1352,7 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void layoutDemoTabRemovesOnlyDiagnostics() throws Exception {
+  void layoutDemoTabHas21WidgetsWithoutFollowBallFlow() throws Exception {
     JsonNode root = new ObjectMapper().readTree(Files.readString(latestLayout()));
     JsonNode demoTab = null;
     for (JsonNode tab : root.get("tabs")) {
@@ -1391,7 +1391,6 @@ class TeleopIntegrationTest {
             "LED Pattern",
             "LED Brightness (%)",
             "LED Idle Effect",
-            "Follow Ball Flow",
             "LED Effective State",
             "LED Flow Direction",
             "LED Driver (PWM/CANdle)",
@@ -1400,7 +1399,10 @@ class TeleopIntegrationTest {
             "Feed Blocked Reason",
             "Drum Target (rot/s)",
             "Drum Actual (rot/s)");
-    assertEquals(expectedTitles, actualTitles, "every non-diagnostic demo widget must remain");
+    assertEquals(
+        expectedTitles,
+        actualTitles,
+        "demo must contain exactly the 21 selected-style and diagnostic widgets");
   }
 
   @Test

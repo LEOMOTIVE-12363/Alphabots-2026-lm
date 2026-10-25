@@ -7,17 +7,16 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import edu.wpi.first.wpilibj.AddressableLEDBuffer;
 import edu.wpi.first.wpilibj.util.Color;
 import frc.robot.subsystems.LED.LEDSection.Role;
-import frc.robot.util.BallFlowTracker.FlowState;
 import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 
 /**
  * The onboard thumbnail is a LOGICAL ball-path render, not a sampling of the physical strip: the
- * shared pipeline (theme × idle effect × ball-flow layer × brightness) is evaluated at eight
- * normalized u positions on a fixed non-reversed section, so onboard 0→7 is always intake→shooter
- * regardless of how the external strip is wired — reversed runs, split side panels and decoration
- * sections can never change the onboard direction or mix decoration into it. These tests pin that
- * contract at the render seam ({@link LED#renderThemeInto} / {@link LED#renderLegacyInto}).
+ * shared pipeline (theme × idle effect × brightness) is evaluated at eight normalized u positions
+ * on a fixed non-reversed section, so onboard 0→7 is always intake→shooter regardless of how the
+ * external strip is wired — reversed runs, split side panels and decoration sections can never
+ * change the onboard direction or mix decoration into it. These tests pin that contract at the
+ * render seam ({@link LED#renderThemeInto} / {@link LED#renderLegacyInto}).
  */
 class LEDOnboardThumbnailTest {
   private static final int THUMBNAIL_PIXELS = LEDConstants.ONBOARD_THUMBNAIL_PIXELS;
@@ -47,24 +46,15 @@ class LEDOnboardThumbnailTest {
     };
   }
 
-  private static BallFlowLayer forwardFlowLayer() {
-    BallFlowLayer layer = new BallFlowLayer();
-    for (int i = 0; i < 50; i++) {
-      layer.update(0.05, FlowState.FORWARD); // ~2.5 s: blend fully in, phase advanced
-    }
-    return layer;
-  }
-
-  private static AddressableLEDBuffer renderThumbnail(BallFlowLayer layer, boolean followFlow) {
+  private static AddressableLEDBuffer renderThumbnail() {
     AddressableLEDBuffer onboard = new AddressableLEDBuffer(THUMBNAIL_PIXELS);
-    LED.renderThemeInto(onboard, ONBOARD_LOGICAL, THEME, EFFECT, layer, NOW_SEC, 1.0, followFlow);
+    LED.renderThemeInto(onboard, ONBOARD_LOGICAL, THEME, EFFECT, NOW_SEC, 1.0);
     return onboard;
   }
 
   @Test
   void onboardMathIsTheSharedPipelineAtNormalizedPositions() {
-    BallFlowLayer layer = new BallFlowLayer(); // blend 0: pure idle math
-    AddressableLEDBuffer onboard = renderThumbnail(layer, true);
+    AddressableLEDBuffer onboard = renderThumbnail();
 
     for (int k = 0; k < THUMBNAIL_PIXELS; k++) {
       double u = THUMBNAIL_PIXELS <= 1 ? 0.0 : (double) k / (THUMBNAIL_PIXELS - 1);
@@ -80,8 +70,7 @@ class LEDOnboardThumbnailTest {
 
   @Test
   void onboardIsIdenticalAcrossExternalWiringVariants() {
-    BallFlowLayer forwardLayer = forwardFlowLayer();
-    AddressableLEDBuffer reference = renderThumbnail(forwardLayer, true);
+    AddressableLEDBuffer reference = renderThumbnail();
     assertNotEquals(
         new AddressableLEDBuffer(THUMBNAIL_PIXELS).getRed(0),
         reference.getRed(0),
@@ -91,10 +80,9 @@ class LEDOnboardThumbnailTest {
     LEDSection[][] variants = wiringVariants();
     for (int variantIndex = 0; variantIndex < variants.length; variantIndex++) {
       LEDSection[] wiring = variants[variantIndex];
-      // Fresh-but-identically-advanced flow state per variant, exactly like one shared clock.
       AddressableLEDBuffer external = new AddressableLEDBuffer(16);
-      LED.renderThemeInto(external, wiring, THEME, EFFECT, forwardFlowLayer(), NOW_SEC, 1.0, true);
-      AddressableLEDBuffer onboard = renderThumbnail(forwardFlowLayer(), true);
+      LED.renderThemeInto(external, wiring, THEME, EFFECT, NOW_SEC, 1.0);
+      AddressableLEDBuffer onboard = renderThumbnail();
 
       assertArrayEquals(
           packed(reference), packed(onboard), "onboard must not depend on external wiring");
@@ -111,10 +99,9 @@ class LEDOnboardThumbnailTest {
 
   @Test
   void offAndZeroBrightnessClearTheThumbnail() {
-    AddressableLEDBuffer zeroed = renderThumbnail(new BallFlowLayer(), true);
+    AddressableLEDBuffer zeroed = renderThumbnail();
     AddressableLEDBuffer dark = new AddressableLEDBuffer(THUMBNAIL_PIXELS);
-    LED.renderThemeInto(
-        dark, ONBOARD_LOGICAL, THEME, EFFECT, new BallFlowLayer(), NOW_SEC, 0.0, true);
+    LED.renderThemeInto(dark, ONBOARD_LOGICAL, THEME, EFFECT, NOW_SEC, 0.0);
     for (int k = 0; k < THUMBNAIL_PIXELS; k++) {
       assertEquals(0, dark.getRed(k), "brightness 0 must dark the thumbnail");
       assertEquals(0, dark.getGreen(k), "brightness 0 must dark the thumbnail");
@@ -131,10 +118,9 @@ class LEDOnboardThumbnailTest {
 
   @Test
   void brightnessIsScaledExactlyOnceOnTheThumbnail() {
-    AddressableLEDBuffer full = renderThumbnail(new BallFlowLayer(), true);
+    AddressableLEDBuffer full = renderThumbnail();
     AddressableLEDBuffer half = new AddressableLEDBuffer(THUMBNAIL_PIXELS);
-    LED.renderThemeInto(
-        half, ONBOARD_LOGICAL, THEME, EFFECT, new BallFlowLayer(), NOW_SEC, 0.5, true);
+    LED.renderThemeInto(half, ONBOARD_LOGICAL, THEME, EFFECT, NOW_SEC, 0.5);
 
     for (int k = 0; k < THUMBNAIL_PIXELS; k++) {
       Color expected = IdleEffects.scale(full.getLED(k), 0.5);
