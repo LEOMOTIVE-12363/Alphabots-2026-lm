@@ -24,11 +24,11 @@ class LEDPreviewLayoutTest {
   private static final String BRIGHTNESS_DISCLAIMER = "Preview colors — not real-strip brightness";
   private static final List<ThemeCard> THEME_CARDS =
       List.of(
-          new ThemeCard("Marigold Bridge", "Slow Flow", 0.0),
-          new ThemeCard("Festival Night", "Breathe", 256.0),
-          new ThemeCard("Papel Fiesta", "Chase", 512.0),
-          new ThemeCard("Alebrije Glow", "Slow Flow", 768.0),
-          new ThemeCard("Candle Memory", "Static", 1024.0));
+          new ThemeCard(LEDTheme.MARIGOLD_BRIDGE, 0.0),
+          new ThemeCard(LEDTheme.FESTIVAL_NIGHT, 256.0),
+          new ThemeCard(LEDTheme.PAPEL_FIESTA, 512.0),
+          new ThemeCard(LEDTheme.ALEBRIJE_GLOW, 768.0),
+          new ThemeCard(LEDTheme.CANDLE_MEMORY, 1024.0));
 
   private static JsonNode root;
 
@@ -166,7 +166,9 @@ class LEDPreviewLayoutTest {
     JsonNode preview = tab("LED Preview");
     for (ThemeCard card : THEME_CARDS) {
       assertEquals(
-          card.theme() + " — Recommended: " + card.recommendedEffect(),
+          card.theme().getDashboardName()
+              + " — Recommended: "
+              + card.theme().getRecommendedEffect().getDashboardName(),
           widgetByTopic(preview, topic(card)).path("title").asText());
     }
   }
@@ -225,7 +227,7 @@ class LEDPreviewLayoutTest {
   }
 
   private static String topic(ThemeCard card) {
-    return PREVIEW_ROOT + "/" + card.theme();
+    return PREVIEW_ROOT + "/" + card.theme().getDashboardName();
   }
 
   private static void assertBounds(
@@ -238,5 +240,5 @@ class LEDPreviewLayoutTest {
         () -> assertEquals(height, widget.path("height").asDouble(), title + " height"));
   }
 
-  private record ThemeCard(String theme, String recommendedEffect, double x) {}
+  private record ThemeCard(LEDTheme theme, double x) {}
 }
