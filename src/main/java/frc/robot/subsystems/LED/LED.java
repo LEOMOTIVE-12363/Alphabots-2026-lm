@@ -181,6 +181,56 @@ public class LED extends SubsystemBase {
     }
   }
 
+  /**
+   * Advances through the five themes from the chooser's current value; legacy patterns start at
+   * Marigold.
+   */
+  public void cycleTheme() {
+    if (Logger.hasReplaySource()) {
+      return;
+    }
+    LEDPattern[] cycle = {
+      LEDPattern.MARIGOLD_BRIDGE,
+      LEDPattern.FESTIVAL_NIGHT,
+      LEDPattern.PAPEL_FIESTA,
+      LEDPattern.ALEBRIJE_GLOW,
+      LEDPattern.CANDLE_MEMORY
+    };
+    LEDPattern current = patternChooser.get();
+    int next = 0;
+    for (int i = 0; i < cycle.length; i++) {
+      if (current == cycle[i]) {
+        next = (i + 1) % cycle.length;
+        break;
+      }
+    }
+    selectOnChooser(PATTERN_SETTING_KEY, cycle[next].getDashboardName());
+  }
+
+  /**
+   * Advances the idle effect only while a theme is selected; legacy patterns leave both choosers
+   * alone.
+   */
+  public void cycleIdleEffect() {
+    if (Logger.hasReplaySource()) {
+      return;
+    }
+    LEDPattern pattern = patternChooser.get();
+    if (pattern == null || pattern.theme().isEmpty()) {
+      return;
+    }
+    IdleEffect[] cycle = IdleEffect.values();
+    IdleEffect current = effectChooser.get();
+    int next = 0;
+    for (int i = 0; i < cycle.length; i++) {
+      if (current == cycle[i]) {
+        next = (i + 1) % cycle.length;
+        break;
+      }
+    }
+    selectOnChooser(EFFECT_SETTING_KEY, cycle[next].getDashboardName());
+  }
+
   /** Writes a chooser's "selected" NT entry, the same way Elastic applies an operator pick. */
   private static void selectOnChooser(String settingKey, String dashboardName) {
     NetworkTableInstance.getDefault().getEntry(settingKey + "/selected").setString(dashboardName);

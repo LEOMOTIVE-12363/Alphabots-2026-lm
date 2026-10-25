@@ -273,7 +273,7 @@ class DriverControlsTest {
     assertFalse(a.started(), "A must not fire on port 1");
     assertFalse(x.started(), "X must not fire on port 1");
     assertFalse(y.started(), "Y must not fire on port 1");
-    assertFalse(start.started(), "Start must not fire on port 1");
+    assertFalse(start.started(), "the RESET_SIM Start binding must not fire on port 1");
     assertFalse(povUp.started(), "D-pad up must not fire on port 1");
     assertFalse(povDown.started(), "D-pad down must not fire on port 1");
     assertFalse(rightTrigger.started(), "RT must not fire on port 1");

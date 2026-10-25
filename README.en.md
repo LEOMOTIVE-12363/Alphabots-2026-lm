@@ -47,7 +47,10 @@ Driver Station port **1 takes priority over 0** for both driving and every butto
 | Outward intake calibration + hood homing | Unbound | Y |
 | Feeder/indexer-only reverse | Unbound | RT |
 | Flywheel speed-limit adjustment | Unbound | D-pad up / down |
+| Cycle LED themes / idle effects | Back / Start | No LED switching |
 | Reset simulated field (no real-robot action) | Unbound | Start |
+
+On port 1, Back cycles the five themes in the order Marigold Bridge → Festival Night → Papel Fiesta → Alebrije Glow → Candle Memory, and Start cycles the five idle effects in the order Static → Breathe → Slow Flow → Chase → Color Step; each press advances exactly one item. Both operate the existing `LED Pattern` / `LED Idle Effect` choosers, so a change from either the controller or Elastic is reflected as the actual selection on the other side and saved by the existing power-cycle persistence. Changing themes still preselects the recommended idle effect, which can then be overridden with Start or Elastic. From a legacy pattern, Back enters Marigold Bridge while Start leaves both selections unchanged. Port 0 Back is unbound, and port 0 Start remains dedicated to simulated-field reset.
 
 LT extends the intake and runs collection; release stops collection without retracting. D-pad left retracts and homes against the inward stop. LB/RT reverse is momentary: the reverse outputs are recomputed from the active pad's held state — while the controlling pad holds LB the intake roller, indexer, and feeder reverse (RT: indexer/feeder only); they zero on release, disconnect, priority loss when the taking-over pad is not holding the same key, or while the robot is disabled. The bindings take no subsystem ownership, so a concurrently running shooting loop overwrites the reverse writes (original behavior, intentionally unchanged).
 
