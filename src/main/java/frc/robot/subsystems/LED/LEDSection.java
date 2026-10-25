@@ -3,18 +3,18 @@ package frc.robot.subsystems.LED;
 import edu.wpi.first.math.MathUtil;
 
 /**
- * One physically contiguous run of the LED strip and its role in the ball-flow display. Sections
- * are described in absolute buffer pixels; {@code reversed} flips the logical direction so two
- * mirrored ball-path strips still show the same physical flow direction: u is always 0 at the
- * intake entrance and 1 at the shooter top, wherever those are physically wired.
+ * One physically contiguous run of the LED strip and its role in the logical layout. Sections are
+ * described in absolute buffer pixels; {@code reversed} flips the logical direction so two mirrored
+ * ball-path strips still show the same physical gradient direction: u is always 0 at the intake
+ * entrance and 1 at the shooter top, wherever those are physically wired.
  */
 public record LEDSection(int startPixel, int lengthPixels, boolean reversed, Role role) {
 
   /** What this run of pixels displays. */
   public enum Role {
-    /** Part of the intake→shooter path: idle effect plus the ball-flow action layer. */
+    /** Part of the intake→shooter path. */
     BALL_PATH,
-    /** Decoration only: always shows the idle effect, never the ball-flow layer. */
+    /** Decoration-only run; it uses the same selected dashboard style. */
     DECORATION
   }
 

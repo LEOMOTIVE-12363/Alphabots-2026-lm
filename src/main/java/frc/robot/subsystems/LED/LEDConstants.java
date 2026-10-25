@@ -2,10 +2,9 @@ package frc.robot.subsystems.LED;
 
 /**
  * Constants for the LED strip subsystem — the single tuning surface for the Day of the Dead themes,
- * idle effects, the ball-flow action layer, and the strip hardware selection. All animation numbers
- * are preview proposals from the design preview, to be tuned on the real strip once installed;
- * distances are in normalized ball-path units (0 = intake entrance, 1 = shooter top), times in
- * seconds.
+ * idle effects, and the strip hardware selection. All animation numbers are preview proposals from
+ * the design preview, to be tuned on the real strip once installed; distances are in normalized
+ * ball-path units (0 = intake entrance, 1 = shooter top), times in seconds.
  *
  * <p>Hardware selection: the strip can be driven either from a roboRIO PWM output or from a CTRE
  * CANdle. Both drivers exist and compile; {@link #HARDWARE} is the only constant that picks between
@@ -66,8 +65,8 @@ public final class LEDConstants {
 
   // The CANdle's 8 onboard LEDs follow the external strip as a LOGICAL ball-path thumbnail (user
   // decision 2026-10-24; second acceptance round 2026-10-24 refined it from physical sampling):
-  // the shared render logic evaluates the same theme, clock, animation phase, ball-flow state and
-  // brightness at eight normalized u positions (onboard 0->7 = intake->shooter, u = k/7) — the
+  // the shared render logic evaluates the same theme, clock, animation phase and brightness at
+  // eight normalized u positions (onboard 0->7 = intake->shooter, u = k/7) — the
   // external wiring order, per-section `reversed` flags and decoration sections can never change
   // the onboard logical direction. The driver receives these colors through
   // LEDIO.writeOnboardBuffer; they share the external strip's frame budget below and do NOT count
@@ -124,24 +123,15 @@ public final class LEDConstants {
   public static final double IDLE_COLOR_STEP_PERIOD_SEC = 1.2; // one color-order rotation step
   public static final double IDLE_COLOR_STEP_BLEND_SEC = 0.18; // RGB crossfade between steps
 
-  // Ball-flow action layer (moving bands on BALL_PATH sections while the mechanism runs).
-  public static final double FLOW_BAND_WIDTH_PATH = 0.30; // total width of one band
-  public static final double FLOW_BAND_SPACING_PATH = 0.65; // center-to-center band spacing
-  public static final double FLOW_FLOOR = 0.18; // brightness between bands
-  public static final double FLOW_TRAVEL_SEC = 1.8; // one band crossing the full path
-  public static final double FLOW_FADE_SEC = 0.35; // layer blend in/out
-  public static final double FLOW_REVERSE_SLEW_SEC = 0.12; // direction reversal through zero
-
-  // TODO(strip wiring): placeholder section map — one BALL_PATH section over the whole strip, so
-  // the flow layer gives direction indication only until the real wiring is known. Then replace
-  // with one entry per SEPARATELY ADDRESSED physical run: absolute start pixel, length in pixels,
-  // reversed flag (set when that run is installed intake-at-the-end, so u=0 stays the intake
+  // TODO(strip wiring): placeholder section map — one BALL_PATH section over the whole strip. Then
+  // replace with one entry per SEPARATELY ADDRESSED physical run: absolute start pixel, length in
+  // pixels, reversed flag (set when that run is installed intake-at-the-end, so u=0 stays the
+  // intake
   // entrance), and role (BALL_PATH for intake/shooter runs, DECORATION for purely cosmetic runs
-  // such as the horizontal back panel, which never shows the ball-flow layer). Two side panels fed
-  // from
-  // ONE data line (split copy) display the same data — model them as a single section, not as two
-  // address ranges; only runs with their own data wires get their own entries. Final wiring
-  // topology is not decided; do not invent one here.
+  // such
+  // as the horizontal back panel). Two side panels fed from ONE data line (split copy) display the
+  // same data — model them as a single section, not as two address ranges; only runs with their own
+  // data wires get their own entries. Final wiring topology is not decided; do not invent one here.
   public static final LEDSection[] SECTIONS = {
     new LEDSection(0, LENGTH_PIXELS, false, LEDSection.Role.BALL_PATH)
   };

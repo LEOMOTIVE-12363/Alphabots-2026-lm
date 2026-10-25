@@ -5,21 +5,22 @@ import java.util.function.DoubleSupplier;
 import org.littletonrobotics.junction.Logger;
 
 /**
- * Heartbeat tracker for the semantic ball-flow state shown by the LED subsystem. Commands report
- * what the mechanism is doing every loop while it holds ({@link #report}); the LED subsystem reads
- * the effective display state ({@link #effectiveState}) instead of watching joystick buttons, so
- * the display follows the mechanism no matter which binding or command drives it.
+ * Heartbeat tracker for read-only semantic mechanism diagnostics consumed by the LED subsystem and
+ * logs. Commands report what the mechanism is doing every loop while it holds ({@link #report});
+ * consumers read the effective diagnostic state ({@link #effectiveState}) instead of watching
+ * joystick buttons, so diagnostics follow the mechanism no matter which binding or command drives
+ * it. This state is never an input to LED rendering.
  *
  * <p>Reports expire {@value #REPORT_EXPIRY_SEC} seconds after the last heartbeat, which makes
  * end/cancel/preemption, disable, and re-enable handling implicit: the moment a command stops
  * running it stops reporting, and the tracker falls back to IDLE on its own — no stale flag can pin
- * the effect forever.
+ * the diagnostic state forever.
  *
- * <p>Conflicting simultaneous reports are shown conservatively: a full-chain reverse fighting a
- * fresh feed/intake report, and any local (feeder/indexer-only) reverse, both display as IDLE with
- * a diagnostic note rather than a clean direction. The strip expresses "the mechanism is running
- * this way", so it must never claim a direction the mechanism does not wholly have. This is
- * display-only; nothing here changes mechanical command behavior.
+ * <p>Conflicting simultaneous reports are reported conservatively: a full-chain reverse fighting a
+ * fresh feed/intake report, and any local (feeder/indexer-only) reverse, both produce IDLE with a
+ * diagnostic note rather than a clean direction. The diagnostic state describes "the mechanism is
+ * running this way", so it must never claim a direction the mechanism does not wholly have. It is
+ * read-only and changes neither mechanical command behavior nor LED pixels.
  *
  * <p>All time comes from {@link Logger#getTimestamp()} (microseconds, replay-deterministic) unless
  * a test clock is injected via {@link #setClockForTest}. The tracker touches no NetworkTables
@@ -34,7 +35,9 @@ public final class BallFlowTracker {
     LOCAL_REVERSE
   }
 
-  /** The display direction the LED subsystem renders on the ball-path sections. */
+  /**
+   * The diagnostic direction reported by the LED subsystem; never used to choose rendered pixels.
+   */
   public enum FlowState {
     IDLE,
     FORWARD,
@@ -68,9 +71,9 @@ public final class BallFlowTracker {
   }
 
   /**
-   * Effective display state after the priority and conflict rules: fresh FULL_REVERSE together with
-   * fresh FEED or INTAKE is a conflict (IDLE); fresh FULL_REVERSE alone is REVERSE; fresh FEED or
-   * INTAKE is FORWARD; any fresh LOCAL_REVERSE stays IDLE (local motion only, never a whole-path
+   * Effective diagnostic state after the priority and conflict rules: fresh FULL_REVERSE together
+   * with fresh FEED or INTAKE is a conflict (IDLE); fresh FULL_REVERSE alone is REVERSE; fresh FEED
+   * or INTAKE is FORWARD; any fresh LOCAL_REVERSE stays IDLE (local motion only, never a whole-path
    * direction); no fresh reports is IDLE.
    */
   public static FlowState effectiveState() {

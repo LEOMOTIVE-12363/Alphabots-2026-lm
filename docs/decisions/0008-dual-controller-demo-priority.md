@@ -137,3 +137,14 @@ sensitivity). Full-tree `./gradlew build`: 176 tests, 0 failures (includes
 the parallel LED session's uncommitted WIP tests; committed tree carries
 155 + these 2). simulateJava smoke: clean startup; loop-overrun warnings
 trace to maple-sim physics as before. Not verified on the real robot.
+
+## Revision 2026-10-24 — reverse heartbeat no longer feeds LEDs
+
+[0012](0012-dashboard-selected-led-only.md) supersedes the original statement
+that the requirement-free reverse heartbeat feeds an LED ball-flow layer. The
+heartbeat and momentary reverse semantics are unchanged, and the heartbeat
+continues to feed `OperatorStatus` and the operator panel; it no longer changes
+LED output. `LED Effective State` and `LED Flow Direction` are read-only
+mechanism diagnostics, not the actual light effect or direction. Controller
+routing, bindings, reverse behavior, commands, and `OperatorStatus` are
+unchanged by this revision.

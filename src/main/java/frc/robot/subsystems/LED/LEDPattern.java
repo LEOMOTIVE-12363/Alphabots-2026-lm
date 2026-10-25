@@ -7,7 +7,7 @@ import java.util.Optional;
  *
  * <p>The first five are the legacy self-colored effects rendered directly by {@link LED}. The five
  * Day of the Dead options each bind a {@link LEDTheme}: they render the theme gradient with the
- * independently chosen {@link IdleEffect}, plus the ball-flow action layer on ball-path sections.
+ * independently chosen {@link IdleEffect}.
  */
 public enum LEDPattern {
   OFF("Off"),
