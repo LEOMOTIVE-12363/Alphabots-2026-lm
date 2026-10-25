@@ -13,7 +13,7 @@ public final class DriverControls {
   public static final int FULL_PORT = 0;
   public static final int DEMO_PORT = 1;
 
-  /** The demo controller exposes only the five illustrated actions, plus the drive axes. */
+  /** Actions are mapped once; full-only actions are unavailable on the demo controller. */
   public enum Action {
     INTAKE(false, hid -> hid.getLeftTriggerAxis() > 0.1),
     EJECT(false, XboxController::getLeftBumperButton),
@@ -26,7 +26,9 @@ public final class DriverControls {
     REVERSE_FEED(true, hid -> hid.getRightTriggerAxis() > 0.5),
     FLYWHEEL_UP(true, hid -> hid.getPOV() == 0),
     FLYWHEEL_DOWN(true, hid -> hid.getPOV() == 180),
-    RESET_SIM(true, XboxController::getStartButton);
+    RESET_SIM(true, XboxController::getStartButton),
+    CYCLE_LED_THEME(false, XboxController::getBackButton),
+    CYCLE_LED_IDLE_EFFECT(false, XboxController::getStartButton);
 
     private final boolean fullOnly;
     private final Predicate<XboxController> pressed;
@@ -86,6 +88,13 @@ public final class DriverControls {
 
   public void onPress(Action action, Supplier<Command> command) {
     bind(action, command, false);
+  }
+
+  /** Binds a rising edge only while the demo controller has control. */
+  public void onDemoPress(Action action, Supplier<Command> command) {
+    Trigger trigger =
+        new Trigger(() -> activePort() == DEMO_PORT && action.pressed.test(controllers[DEMO_PORT]));
+    trigger.onTrue(command.get().onlyWhile(() -> activePort() == DEMO_PORT));
   }
 
   /**
