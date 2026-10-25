@@ -295,8 +295,9 @@ tests are kept as regressions. None of the earlier revisions' visual semantics
    plus `LEDLegacyChaseSyncTest` (lap/phase/wraparound across lengths, single
    brightness scaling, preview periodicity).
 
-Verification (local, no real strip/CAN): full offline build 27 suites /
-312 tests / 0 failures/errors/skipped (baseline 290 + 22 new); bounded
+Verification (local, no real strip/CAN): full offline build 31 suites /
+312 tests / 0 failures/errors/skipped (baseline 26 suites / 290 + 5
+new suites / 22 new tests); bounded
 PWM- and CANDLE-configuration `simulateJava` smokes each reached robot-program
 startup complete with zero exceptions and zero loop-overrun warnings in the
 window (the CANdle sim still uses the `none()` stub — real-bus latency is
