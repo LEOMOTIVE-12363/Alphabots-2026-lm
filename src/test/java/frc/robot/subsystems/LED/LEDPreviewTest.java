@@ -296,28 +296,22 @@ class LEDPreviewTest {
   }
 
   @Test
-  void previewUpdatesDoNotMutateRealOnboardFlowOrControlState() throws Exception {
+  void previewUpdatesDoNotMutateRealOnboardThemeOrControlState() throws Exception {
     HAL.initialize(500, 0);
     LED led = LED.mInstance;
     AddressableLEDBuffer real = field(led, "buffer");
     AddressableLEDBuffer onboard = field(led, "onboardBuffer");
-    BallFlowLayer flow = field(led, "flowLayer");
     int[] originalReal = packed(real);
     int[] originalOnboard = packed(onboard);
-    double originalPhase = flow.getPhase();
-    double originalBlend = flow.getBlend();
-    double originalDirection = flow.getDirectionSign();
     LEDTheme originalActiveTheme = field(led, "activeTheme");
     LEDTheme originalPreviousTheme = field(led, "previousTheme");
     double originalTransitionStart = field(led, "themeTransitionStartSec");
 
     var controls = NetworkTableInstance.getDefault();
     var brightness = controls.getEntry("/Tuning/LED Brightness (%)");
-    var follow = controls.getEntry(LED.FOLLOW_FLOW_SETTING_KEY);
     var pattern = controls.getEntry(LED.PATTERN_SETTING_KEY + "/selected");
     var effect = controls.getEntry(LED.EFFECT_SETTING_KEY + "/selected");
     double oldBrightness = brightness.getDouble(100.0);
-    boolean oldFollow = follow.getBoolean(true);
     String oldPattern = pattern.getString("");
     String oldEffect = effect.getString("");
 
@@ -326,46 +320,35 @@ class LEDPreviewTest {
     try (Harness harness = new Harness()) {
       LED.renderLegacyInto(real, LEDPattern.RAINBOW, 0.41, 63.0);
       LED.renderLegacyInto(onboard, LEDPattern.CHASE, 0.41, 63.0);
-      flow.update(0.2, FlowState.FORWARD);
       int[] sentinelReal = packed(real);
       int[] sentinelOnboard = packed(onboard);
-      double sentinelPhase = flow.getPhase();
-      double sentinelBlend = flow.getBlend();
-      double sentinelDirection = flow.getDirectionSign();
       brightness.setDouble(23.0);
-      follow.setBoolean(false);
       pattern.setString("Candle Memory");
       effect.setString("Chase");
-      BallFlowTracker.report(FlowKind.INTAKE);
+      BallFlowTracker.report(FlowKind.LOCAL_REVERSE);
+      assertEquals(FlowState.IDLE, BallFlowTracker.effectiveState());
+      assertEquals("local reverse only", BallFlowTracker.diagnostic());
 
       harness.preview.update(LEDPattern.FESTIVAL_NIGHT, IdleEffect.COLOR_STEP, NOW_SEC);
       harness.preview.update(LEDPattern.OFF, IdleEffect.STATIC, NOW_SEC + 0.01);
 
       assertArrayEquals(sentinelReal, packed(real), "real strip buffer must be independent");
       assertArrayEquals(sentinelOnboard, packed(onboard), "onboard buffer must be independent");
-      assertEquals(sentinelPhase, flow.getPhase());
-      assertEquals(sentinelBlend, flow.getBlend());
-      assertEquals(sentinelDirection, flow.getDirectionSign());
       assertSame(originalActiveTheme, field(led, "activeTheme"));
       assertSame(originalPreviousTheme, field(led, "previousTheme"));
       assertEquals(originalTransitionStart, (double) field(led, "themeTransitionStartSec"));
       assertEquals(23.0, brightness.getDouble(0.0));
-      assertFalse(follow.getBoolean(true));
       assertEquals("Candle Memory", pattern.getString(""));
       assertEquals("Chase", effect.getString(""));
-      assertEquals(FlowState.FORWARD, BallFlowTracker.effectiveState());
-      assertEquals("", BallFlowTracker.diagnostic());
+      assertEquals(FlowState.IDLE, BallFlowTracker.effectiveState());
+      assertEquals("local reverse only", BallFlowTracker.diagnostic());
     } finally {
       restoreBuffer(real, originalReal);
       restoreBuffer(onboard, originalOnboard);
-      setField(flow, "phase", originalPhase);
-      setField(flow, "blend", originalBlend);
-      setField(flow, "directionSign", originalDirection);
       setField(led, "activeTheme", originalActiveTheme);
       setField(led, "previousTheme", originalPreviousTheme);
       setField(led, "themeTransitionStartSec", originalTransitionStart);
       brightness.setDouble(oldBrightness);
-      follow.setBoolean(oldFollow);
       pattern.setString(oldPattern);
       effect.setString(oldEffect);
       BallFlowTracker.resetForTest();
@@ -381,8 +364,7 @@ class LEDPreviewTest {
       LEDTheme theme, IdleEffect effect, int samples, double nowSec) {
     AddressableLEDBuffer buffer = new AddressableLEDBuffer(samples);
     LEDSection[] sections = {new LEDSection(0, samples, false, LEDSection.Role.BALL_PATH)};
-    LED.renderThemeInto(
-        buffer, sections, theme::colorAt, effect, new BallFlowLayer(), nowSec, 1.0, false);
+    LED.renderThemeInto(buffer, sections, theme::colorAt, effect, nowSec, 1.0);
     return hex(buffer);
   }
 

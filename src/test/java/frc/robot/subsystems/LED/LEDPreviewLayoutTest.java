@@ -55,7 +55,7 @@ class LEDPreviewLayoutTest {
     assertAll(
         () -> assertEquals(0, containers(tab("Teleoperated")).size()),
         () -> assertEquals(18, containers(tab("DriverDashboard")).size()),
-        () -> assertEquals(22, containers(tab("demo")).size()));
+        () -> assertEquals(21, containers(tab("demo")).size()));
   }
 
   @Test

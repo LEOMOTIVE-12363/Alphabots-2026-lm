@@ -223,3 +223,12 @@ configuration was observed failing as expected at external pixel 60
 (device index 68). Physical density, full-strip illumination, color order,
 power delivery and smoothness remain unverified on the real LEDs; the
 fake-transport regression is not hardware acceptance.
+
+## Revision 8 (2026-10-24, dashboard-only LED visuals)
+
+The ball-flow and robot/mechanism-state visual requirements above, including
+references to ball-flow direction/state in onboard rendering, are superseded by
+[0012 — Dashboard-selected LED output only](0012-dashboard-selected-led-only.md).
+The hardware driver, installation, persistence mechanism, and
+bounded-send/recovery decisions are unchanged; 0012 defines the current visual
+and diagnostic semantics.

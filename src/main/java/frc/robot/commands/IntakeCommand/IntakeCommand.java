@@ -46,8 +46,7 @@ public class IntakeCommand extends Command {
   public void execute() {
     runIntake();
     updatePreload();
-    // Heartbeat the semantic intake state for both the LED ball-flow display and the
-    // operator panel; display-only.
+    // Heartbeat the semantic intake state for read-only LED diagnostics and the operator panel.
     BallFlowTracker.report(BallFlowTracker.FlowKind.INTAKE);
     OperatorStatus.report(OperatorStatus.Action.INTAKING);
   }

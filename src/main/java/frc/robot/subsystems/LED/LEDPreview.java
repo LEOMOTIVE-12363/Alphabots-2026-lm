@@ -30,7 +30,6 @@ final class LEDPreview {
       new AddressableLEDBuffer[LEDTheme.values().length];
   private final AddressableLEDBuffer legacyBuffer =
       new AddressableLEDBuffer(LEDConstants.LENGTH_PIXELS);
-  private final BallFlowLayer flowPlaceholder = new BallFlowLayer();
   private final String[] currentOutput = new String[CURRENT_SELECTION_SAMPLES];
   private final String[][] themeOutputs = new String[LEDTheme.values().length][];
   private final int[] currentPacked = new int[CURRENT_SELECTION_SAMPLES];
@@ -87,10 +86,8 @@ final class LEDPreview {
             THEME_CARD_SECTIONS,
             theme::colorAt,
             theme.getRecommendedEffect(),
-            flowPlaceholder,
             nowSec,
-            1.0,
-            false);
+            1.0);
         publishBuffer(
             index + 1, themeBuffers[index], themeOutputs[index], themePacked[index], false);
       }
@@ -106,14 +103,7 @@ final class LEDPreview {
   private void renderCurrent(LEDPattern pattern, IdleEffect effect, double nowSec) {
     if (pattern.theme().isPresent()) {
       LED.renderThemeInto(
-          currentBuffer,
-          CURRENT_SECTIONS,
-          pattern.theme().get()::colorAt,
-          effect,
-          flowPlaceholder,
-          nowSec,
-          1.0,
-          false);
+          currentBuffer, CURRENT_SECTIONS, pattern.theme().get()::colorAt, effect, nowSec, 1.0);
       return;
     }
 
