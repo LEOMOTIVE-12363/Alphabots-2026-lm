@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import edu.wpi.first.hal.HAL;
@@ -18,6 +19,7 @@ import frc.robot.util.BallFlowTracker.FlowKind;
 import frc.robot.util.DashboardControls;
 import frc.robot.util.DashboardControlsTestUtil;
 import java.lang.reflect.Field;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -25,21 +27,25 @@ import java.util.function.DoubleSupplier;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.littletonrobotics.junction.networktables.LoggedDashboardChooser;
 import org.littletonrobotics.junction.networktables.LoggedNetworkInput;
 
 /** The dashboard style is the only input allowed to change the rendered LED pixels. */
 class LEDBehaviorTest {
+  @TempDir static Path tempDir;
+
   private static final String LEGACY_FLOW_KEY = "/SmartDashboard/LED Follow Ball Flow";
   private static final String BRIGHTNESS_KEY = "/Tuning/LED Brightness (%)";
   private static final double[] trackerNow = {0.0};
 
+  private static final int SAMPLES_PER_PERIOD = 12;
   private static final StyleCase STATIC_STYLE =
       new StyleCase(
           "Candle Memory Static",
           LEDPattern.CANDLE_MEMORY,
           IdleEffect.STATIC,
-          0.37,
+          1.0,
           false,
           0xFF9500);
   private static final List<StyleCase> ANIMATED_STYLES =
@@ -48,21 +54,39 @@ class LEDBehaviorTest {
               "theme Slow Flow",
               LEDPattern.MARIGOLD_BRIDGE,
               IdleEffect.SLOW_FLOW,
-              0.75,
+              LEDConstants.IDLE_SLOW_FLOW_PERIOD_SEC,
               true,
               null),
           new StyleCase(
-              "theme Chase", LEDPattern.MARIGOLD_BRIDGE, IdleEffect.CHASE, 0.55, true, null),
+              "theme Chase",
+              LEDPattern.MARIGOLD_BRIDGE,
+              IdleEffect.CHASE,
+              LEDConstants.IDLE_CHASE_PERIOD_SEC,
+              true,
+              null),
           new StyleCase(
-              "theme Breathe", LEDPattern.MARIGOLD_BRIDGE, IdleEffect.BREATHE, 0.70, true, null),
-          new StyleCase("legacy Rainbow", LEDPattern.RAINBOW, IdleEffect.STATIC, 0.40, true, null));
+              "theme Breathe",
+              LEDPattern.MARIGOLD_BRIDGE,
+              IdleEffect.BREATHE,
+              LEDConstants.IDLE_BREATHE_PERIOD_SEC,
+              true,
+              null),
+          new StyleCase(
+              "legacy Rainbow",
+              LEDPattern.RAINBOW,
+              IdleEffect.STATIC,
+              LEDConstants.RAINBOW_FULL_CYCLE_SEC,
+              true,
+              null));
 
   private static String savedPatternSelected;
   private static String savedEffectSelected;
+  private static boolean savedPatternSelectedExists;
+  private static boolean savedEffectSelectedExists;
   private static String savedPatternChooserName;
   private static String savedEffectChooserName;
-  private static String savedPatternPersisted;
-  private static String savedEffectPersisted;
+  private static Object savedSettingsStore;
+  private static Object temporarySettingsStore;
   private static boolean savedLegacyFollowExists;
   private static boolean savedLegacyFollow;
   private static double savedBrightness;
@@ -94,17 +118,21 @@ class LEDBehaviorTest {
     savedEnabled = DriverStation.isEnabled();
     savedAttached = DriverStation.isDSAttached();
 
-    assertNotNull(LED.mInstance, "the real LED subsystem must be constructed");
-    refreshLedInputs();
     NetworkTableInstance nt = NetworkTableInstance.getDefault();
+    savedSettingsStore = settingsStoreField().get(null);
+    savedPatternSelectedExists = nt.getEntry(LED.PATTERN_SETTING_KEY + "/selected").exists();
+    savedEffectSelectedExists = nt.getEntry(LED.EFFECT_SETTING_KEY + "/selected").exists();
     savedPatternSelected = nt.getEntry(LED.PATTERN_SETTING_KEY + "/selected").getString("");
     savedEffectSelected = nt.getEntry(LED.EFFECT_SETTING_KEY + "/selected").getString("");
-    savedPatternChooserName = dashboardName(chooserValue("patternChooser"));
-    savedEffectChooserName = dashboardName(chooserValue("effectChooser"));
-    savedPatternPersisted = DashboardControls.getSavedString(LED.PATTERN_SETTING_KEY, null);
-    savedEffectPersisted = DashboardControls.getSavedString(LED.EFFECT_SETTING_KEY, null);
     savedLegacyFollowExists = nt.getEntry(LEGACY_FLOW_KEY).exists();
     savedLegacyFollow = nt.getEntry(LEGACY_FLOW_KEY).getBoolean(true);
+
+    assertNotNull(LED.mInstance, "the real LED subsystem must be constructed");
+    refreshLedInputs();
+    savedPatternChooserName = dashboardName(chooserValue("patternChooser"));
+    savedEffectChooserName = dashboardName(chooserValue("effectChooser"));
+    temporarySettingsStore = newSettingsStore(tempDir.resolve("behavior-settings.txt"));
+    settingsStoreField().set(null, temporarySettingsStore);
 
     snapshotTracker();
     snapshotLed();
@@ -123,11 +151,13 @@ class LEDBehaviorTest {
   static void tearDown() throws Exception {
     restoreSelected(
         LED.PATTERN_SETTING_KEY,
+        savedPatternSelectedExists,
         savedPatternSelected,
         savedPatternChooserName,
         LEDPattern.MARIGOLD_BRIDGE.getDashboardName());
     restoreSelected(
         LED.EFFECT_SETTING_KEY,
+        savedEffectSelectedExists,
         savedEffectSelected,
         savedEffectChooserName,
         IdleEffect.SLOW_FLOW.getDashboardName());
@@ -137,12 +167,7 @@ class LEDBehaviorTest {
       NetworkTableInstance.getDefault().getEntry(LEGACY_FLOW_KEY).unpublish();
     }
     setBrightness(savedBrightness);
-    restorePersisted(
-        LED.PATTERN_SETTING_KEY,
-        savedPatternPersisted,
-        LEDPattern.MARIGOLD_BRIDGE.getDashboardName());
-    restorePersisted(
-        LED.EFFECT_SETTING_KEY, savedEffectPersisted, IdleEffect.SLOW_FLOW.getDashboardName());
+    restoreSettingsStore();
     restoreTracker();
     restoreLed();
 
@@ -235,25 +260,46 @@ class LEDBehaviorTest {
     int[] beforeExternal = pixels("buffer");
     int[] beforeOnboard = pixels("onboardBuffer");
 
-    // Deliberately non-integral periods: a full-cycle step could make a real animation look static.
-    SimHooks.stepTiming(style.timeStepSec());
-    runPeriodic();
-    int[] afterExternal = pixels("buffer");
-    int[] afterOnboard = pixels("onboardBuffer");
+    assertTimeSamples(style, beforeExternal, beforeOnboard);
+  }
+
+  /** Samples a complete period so quantization at one starting phase cannot hide real animation. */
+  private static void assertTimeSamples(
+      StyleCase style, int[] initialExternal, int[] initialOnboard) throws Exception {
+    boolean externalChanged = false;
+    boolean onboardChanged = false;
+    for (int sample = 1; sample <= SAMPLES_PER_PERIOD; sample++) {
+      SimHooks.stepTiming(style.periodSec() / SAMPLES_PER_PERIOD);
+      runPeriodic();
+      int[] currentExternal = pixels("buffer");
+      int[] currentOnboard = pixels("onboardBuffer");
+      if (style.changesWithTime()) {
+        externalChanged |= !Arrays.equals(initialExternal, currentExternal);
+        onboardChanged |= !Arrays.equals(initialOnboard, currentOnboard);
+      } else {
+        assertArrayEquals(
+            initialExternal,
+            currentExternal,
+            style.name() + " external STATIC pixels changed at sample " + sample);
+        assertArrayEquals(
+            initialOnboard,
+            currentOnboard,
+            style.name() + " onboard STATIC pixels changed at sample " + sample);
+      }
+    }
     if (style.changesWithTime()) {
-      assertFalse(
-          Arrays.equals(beforeExternal, afterExternal),
-          style.name() + " external pixels did not change after " + style.timeStepSec() + " s");
-      assertFalse(
-          Arrays.equals(beforeOnboard, afterOnboard),
-          style.name() + " onboard pixels did not change after " + style.timeStepSec() + " s");
-    } else {
-      assertArrayEquals(
-          beforeExternal,
-          afterExternal,
-          style.name() + " external STATIC pixels changed with time");
-      assertArrayEquals(
-          beforeOnboard, afterOnboard, style.name() + " onboard STATIC pixels changed with time");
+      assertTrue(
+          externalChanged,
+          style.name()
+              + " external pixels never changed across a full "
+              + style.periodSec()
+              + " s period");
+      assertTrue(
+          onboardChanged,
+          style.name()
+              + " onboard pixels never changed across a full "
+              + style.periodSec()
+              + " s period");
     }
   }
 
@@ -379,7 +425,17 @@ class LEDBehaviorTest {
   }
 
   private static void restoreSelected(
-      String settingKey, String rawSelected, String chooserName, String fallback) throws Exception {
+      String settingKey, boolean existed, String rawSelected, String chooserName, String fallback)
+      throws Exception {
+    if (!existed) {
+      // unpublish() removes the value instead of inventing a default entry for an originally absent
+      // selected key. The chooser's own default remains effective when periodic() next reads it.
+      var selectedEntry = NetworkTableInstance.getDefault().getEntry(settingKey + "/selected");
+      selectedEntry.unpublish();
+      refreshLedInputs();
+      assertFalse(selectedEntry.exists(), settingKey + " selected was republished after unpublish");
+      return;
+    }
     String selected = rawSelected == null || rawSelected.isEmpty() ? chooserName : rawSelected;
     if (selected == null || selected.isEmpty()) {
       selected = fallback;
@@ -388,8 +444,33 @@ class LEDBehaviorTest {
     refreshLedInputs();
   }
 
-  private static void restorePersisted(String settingKey, String saved, String fallback) {
-    DashboardControls.persistStringIfChanged(settingKey, saved == null ? fallback : saved);
+  private static Field settingsStoreField() throws NoSuchFieldException {
+    Field field = DashboardControls.class.getDeclaredField("settingsFile");
+    field.setAccessible(true);
+    return field;
+  }
+
+  private static Object newSettingsStore(Path path) throws Exception {
+    Class<?> storeClass = Class.forName("frc.robot.util.DashboardSettingsFile");
+    var constructor = storeClass.getDeclaredConstructor(Path.class);
+    constructor.setAccessible(true);
+    return constructor.newInstance(path);
+  }
+
+  private static void restoreSettingsStore() throws Exception {
+    try {
+      if (temporarySettingsStore != null) {
+        // Flush only the disposable store; never write test values into the previous store.
+        var saveNow = temporarySettingsStore.getClass().getDeclaredMethod("saveNow");
+        saveNow.setAccessible(true);
+        saveNow.invoke(temporarySettingsStore);
+      }
+    } finally {
+      // This may be null (the lazy default) or another test class's store; restore it verbatim.
+      settingsStoreField().set(null, savedSettingsStore);
+      assertSame(
+          savedSettingsStore, settingsStoreField().get(null), "settings store was not restored");
+    }
   }
 
   private static void setBrightness(double value) {
@@ -503,7 +584,7 @@ class LEDBehaviorTest {
       String name,
       LEDPattern pattern,
       IdleEffect effect,
-      double timeStepSec,
+      double periodSec,
       boolean changesWithTime,
       Integer expectedFirstPixel) {}
 
