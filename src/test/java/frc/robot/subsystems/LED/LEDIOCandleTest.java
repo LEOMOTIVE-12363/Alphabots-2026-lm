@@ -880,6 +880,49 @@ class LEDIOCandleTest {
     assertEquals(100 << 16, transport.displayed[8]);
   }
 
+  /**
+   * Fourth acceptance round (2026-10-26): every ACCEPTED config task stamps the shared attempt
+   * clock, so a failed keepalive/reset config is retried only after the full 2 s interval — and
+   * once the interval expires and the device recovers, the retry lands and the latest frame shows.
+   */
+  @Test
+  void failedConfigRetriesOnlyAfterTheIntervalAndThenRestoresTheLatestFrame() {
+    FakeTransport transport = new FakeTransport();
+    Clock clock = new Clock();
+    LEDIOCandle io = driver(transport, clock, PIXELS, 64);
+    AddressableLEDBuffer red = bufferWithColor(PIXELS, 100, 0, 0);
+    io.writeBuffer(red);
+    transport.statusToReturn = StatusCode.NoDevicesOnBus;
+
+    clock.now += 3 * REFRESH_SEC; // keepalive due; the config fails
+    io.writeBuffer(red);
+    io.awaitConfigWork();
+    int attemptsAfterFailure = transport.configCalls;
+
+    clock.now += 0.02; // only 20 ms later — inside the 2 s retry interval
+    io.writeBuffer(red);
+    io.awaitConfigWork();
+    assertEquals(
+        attemptsAfterFailure,
+        transport.configCalls,
+        "a retry inside the configured interval must not configure again");
+
+    transport.statusToReturn = StatusCode.OK;
+    AddressableLEDBuffer blue = bufferWithColor(PIXELS, 0, 0, 200);
+    clock.now += LEDConstants.CANDLE_INIT_RETRY_INTERVAL_SEC + STEP_SEC; // interval expired
+    io.writeBuffer(blue);
+    io.awaitConfigWork();
+    assertTrue(
+        transport.configCalls > attemptsAfterFailure, "the retry must fire once the interval ends");
+    for (int i = 0; i < 3; i++) {
+      clock.now += STEP_SEC;
+      io.writeBuffer(blue);
+    }
+    for (int i = 0; i < PIXELS; i++) {
+      assertEquals(200, transport.displayed[i + 8], "latest frame after recovery, pixel " + i);
+    }
+  }
+
   @Test
   void closeStopsNewConfigTasksAndDrainsTheWorker() {
     FakeTransport transport = new FakeTransport();

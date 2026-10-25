@@ -441,8 +441,14 @@ public class LED extends SubsystemBase {
         double head = (now * LEDConstants.CHASE_SPEED_PIXELS_PER_SEC) % lap;
         boolean isReferenceRender = length == referenceLength;
         for (int i = 0; i < length; i++) {
+          // Thumbnail u=1 must land on the external strip's actual final pixel
+          // (referenceLength - 1): u × referenceLength pointed one pixel past the end, so the
+          // thumbnail's last LED lit exactly when the strip had gone dark (fourth acceptance
+          // round, 2026-10-26).
           double position =
-              isReferenceRender ? i : normalizedThumbnailPosition(i, length) * referenceLength;
+              isReferenceRender
+                  ? i
+                  : normalizedThumbnailPosition(i, length) * (referenceLength - 1);
           double distanceBehindHead = head - position;
           int value = 0;
           if (distanceBehindHead >= 0 && distanceBehindHead < LEDConstants.CHASE_TAIL_PIXELS) {

@@ -305,3 +305,46 @@ covered only by the injected-latency tests). The round-2 recovery tests were
 ported with an async-preserving adaptation (await the worker, then drive a few
 ticks — assertion strength unchanged) because recovery now runs on the
 background worker by design.
+
+## Revision 10 (2026-10-26, fourth acceptance round: unified attempt clock, thumbnail endpoint mapping)
+
+Codex's fourth independent acceptance round (baseline demo `7c88e36`) found
+two P2 boundary defects in the Revision 9 rework; both are fixed with the
+round-4 independent tests kept in-tree (`LEDFourthAcceptanceTest`, 4 tests,
+verbatim). No earlier decision changes; the background-worker model, hardware
+serialization, single-task limit, latest-frame recovery, unified color-order
+contract and dashboard-only visuals are all preserved.
+
+1. **Unified config-attempt clock.** Revision 9 stamped `lastInitAttemptSec`
+   only in the init-retry branch, so a reset or keepalive config that failed
+   after a long healthy run was retried on the very next loop (20 ms later)
+   because the attempt clock still held the construction-time value. The
+   stamp now lives where a config task is actually accepted
+   (`submitConfigTask`): first init, reset re-init, keepalive and the
+   failure-retry path share one consistent 2 s rate limit, and a rejected
+   submission (a task already pending, or the driver closed) never refreshes
+   the clock, so retries cannot be postponed forever either. Regressions:
+   the round-4 interval tests (keepalive and reset scenarios) plus an
+   in-suite test covering interval expiry, recovery and latest-frame repaint.
+
+2. **Chase thumbnail endpoint mapping.** The Revision 9 thumbnail mapping
+   used `u × referenceLength`, whose u=1 lands one pixel past the external
+   strip's actual final pixel (coordinates are 0..referenceLength−1): with
+   200 px the onboard last LED lit exactly when the strip had gone dark
+   (t=9.95 s external end bright / thumbnail dark; t=10.25 s external all
+   dark / thumbnail still lit). The mapping is now
+   `u × (referenceLength − 1)` — u=1 is the real final external pixel — with
+   the length-1 convention still position 0. Reference-length renders keep
+   the exact original external math (speed, tail, lap and per-pixel values
+   unchanged). The in-suite chase tests that had copied the old formula were
+   corrected to the endpoint mapping (the independent acceptance assertions
+   are untouched); length-1 added to the length-sweep regression.
+
+Verification (local, no real strip/CAN): full offline build 32 suites /
+317 tests / 0 failures/errors/skipped (round-4 file 4 + 1 in-suite retry
+test over the 312 baseline); bounded 75 s PWM- and CANDLE-configuration
+`simulateJava` smokes each reached robot-program startup complete with zero
+exceptions and zero loop-overrun warnings in this round's logs (the
+acceptance round's own 25 s runs did log the pre-existing maple-sim loop
+warnings — recorded as such; the CANDLE sim still uses the `none()` stub, so
+real-bus latency remains covered only by injected-latency tests).
