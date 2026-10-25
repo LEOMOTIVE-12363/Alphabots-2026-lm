@@ -22,10 +22,9 @@ import org.littletonrobotics.junction.Logger;
  * pin. Commands also call {@link #clearFeedDecision()} from {@code end()} so the panel drops a
  * finished command's decision immediately instead of waiting out the expiry.
  *
- * <p>When no command decision is fresh, the panel falls back to its own {@link ShotReadiness}
- * evaluation of the dashboard shot configuration as an at-a-glance preview; that fallback uses
- * instantaneous readiness only, because a fallback debounce could drift from the command's own
- * debounce timing.
+ * <p>When no command decision is fresh, the panel uses only {@code flywheelZero} from its own
+ * {@link ShotReadiness} evaluation as the fallback permission input. Drum/hood/raw/stable readiness
+ * remains available as diagnostics but does not change fallback feed permission or blocked reason.
  *
  * <p>The display publishes at 10 Hz from {@code Robot}'s dashboard-publish block via {@link
  * #publish} while control decisions ({@link #update}, {@link #feedAllowed}) run every loop. All
@@ -34,8 +33,9 @@ import org.littletonrobotics.junction.Logger;
  */
 public final class OperatorStatus {
   /**
-   * What a command reports while it runs. The effective action is the highest-priority fresh one
-   * (see {@link #currentAction()}); IDLE is the no-fresh-reports fallback, not normally reported.
+   * What a command reports while it runs. SPINNING_UP, FEEDING, WAITING_RECOVERY and CLEARING_JAM
+   * are mutually exclusive shooter states: reporting one clears the other three timestamps so the
+   * new state takes effect immediately. INTAKING and REVERSING_* retain their priority and expiry.
    */
   public enum Action {
     IDLE,
@@ -51,8 +51,8 @@ public final class OperatorStatus {
   /** Seconds a report stays fresh after its last heartbeat. */
   private static final double REPORT_EXPIRY_SEC = 0.15;
 
-  // Effective-action priority, highest first: eject/unjam handling outranks any feeding, feeding
-  // outranks preparation. IDLE is not listed; it is the fallback when nothing is fresh.
+  // Effective-action priority, highest first. Reversing overlays all other actions; the mutually
+  // exclusive shooter states below cannot remain fresh together. IDLE is the no-reports fallback.
   private static final Action[] PRIORITY = {
     Action.REVERSING_FULL,
     Action.REVERSING_LOCAL,
@@ -63,15 +63,18 @@ public final class OperatorStatus {
     Action.INTAKING
   };
 
+  private static final Action[] SHOOTER_ACTIONS = {
+    Action.SPINNING_UP, Action.FEEDING, Action.WAITING_RECOVERY, Action.CLEARING_JAM
+  };
+
   // Last heartbeat timestamp (seconds) per Action, indexed by ordinal; NEGATIVE_INFINITY means
   // never reported, so boot and reset start from a clean IDLE with no special-casing.
   private static final double[] lastReportSec = new double[Action.values().length];
 
   private static DoubleSupplier clockForTest;
 
-  // The dashboard's own readiness evaluator, used only as a fallback preview when no shooting
-  // command is reporting its decision. Before the first update() the placeholder matches a freshly
-  // booted robot: enabled-or-not, the flywheel is not yet at shot speed.
+  // The dashboard's own diagnostic evaluator. Its flywheelZero field is the fallback permission
+  // input when no shooting command reports a fresh decision; the other fields remain diagnostics.
   private static final ShotReadiness shotReadiness = new ShotReadiness();
   private static ShotReadiness.Evaluation latestEvaluation = notReadyPlaceholder();
 
@@ -90,15 +93,25 @@ public final class OperatorStatus {
 
   /**
    * Heartbeat: call every loop while the action holds; a report expires after {@value
-   * #REPORT_EXPIRY_SEC} seconds.
+   * #REPORT_EXPIRY_SEC} seconds. Reporting a shooter state clears the other shooter-state
+   * heartbeats, but leaves INTAKING and REVERSING_* untouched.
    */
   public static void report(Action action) {
+    switch (action) {
+      case SPINNING_UP, FEEDING, WAITING_RECOVERY, CLEARING_JAM -> {
+        for (Action shooterAction : SHOOTER_ACTIONS) {
+          lastReportSec[shooterAction.ordinal()] = Double.NEGATIVE_INFINITY;
+        }
+      }
+      default -> {}
+    }
     lastReportSec[action.ordinal()] = nowSec();
   }
 
   /**
    * The active shooting command's own feed decision; call every loop from {@code execute()}. Like
-   * an action report, it expires after {@value #REPORT_EXPIRY_SEC} seconds.
+   * an action report, it expires after {@value #REPORT_EXPIRY_SEC} seconds. This does not alter
+   * action heartbeats: an allowed decision alone cannot clear an actively reported CLEARING_JAM.
    */
   public static void reportFeedDecision(boolean allowed, String blockedReason) {
     commandFeedAllowed = allowed;
@@ -127,11 +140,10 @@ public final class OperatorStatus {
   }
 
   /**
-   * Refreshes the fallback readiness evaluation against the dashboard shot configuration (full shot
-   * speed, plus the Hood Angle (%) entry); used only while no shooting command reports its own
-   * decision. Reads subsystem inputs and {@link DashboardControls} only and touches no
-   * NetworkTables entries, so it is safe in every mode including replay; call every robotPeriodic
-   * loop.
+   * Refreshes the fallback diagnostic evaluation against the dashboard shot configuration (full
+   * shot speed, plus the Hood Angle (%) entry). Reads subsystem inputs and {@link
+   * DashboardControls} only and touches no NetworkTables entries, so it is safe in every mode
+   * including replay; call every robotPeriodic loop.
    */
   public static void update() {
     latestEvaluation =
@@ -141,8 +153,8 @@ public final class OperatorStatus {
 
   /**
    * True while feeding is allowed: robot enabled, no jam clearing in progress, and the active
-   * shooting command's own decision permitting — or, when no command is running, the fallback
-   * readiness preview.
+   * shooting command's own decision permitting. Without a fresh command decision, only a zero
+   * flywheel limit blocks the fallback; drum/hood readiness does not.
    */
   public static boolean feedAllowed() {
     if (DriverStation.isDisabled() || currentAction() == Action.CLEARING_JAM) {
@@ -151,7 +163,7 @@ public final class OperatorStatus {
     if (hasFreshCommandDecision()) {
       return commandFeedAllowed;
     }
-    return latestEvaluation.rawReady();
+    return !latestEvaluation.flywheelZero();
   }
 
   /** Why feeding is blocked right now, or "" when it is allowed. */
@@ -165,7 +177,9 @@ public final class OperatorStatus {
     if (hasFreshCommandDecision()) {
       return commandFeedBlockedReason;
     }
-    return latestEvaluation.blockReason();
+    return latestEvaluation.flywheelZero()
+        ? ShotReadiness.REASON_FLYWHEEL_ZERO
+        : ShotReadiness.REASON_NONE;
   }
 
   /**
@@ -189,7 +203,7 @@ public final class OperatorStatus {
   }
 
   /**
-   * Clears every remembered heartbeat and command decision and restarts the readiness debounce;
+   * Clears every remembered heartbeat and command decision and restarts the diagnostic debounce;
    * restore an injected clock separately (null argument).
    */
   public static void resetForTest() {
@@ -217,7 +231,7 @@ public final class OperatorStatus {
       case INTAKING -> "Intaking";
       case SPINNING_UP -> "Spinning Up";
       case FEEDING -> "Feeding";
-      case WAITING_RECOVERY -> "Waiting for Flywheel/Hood";
+      case WAITING_RECOVERY -> "Waiting for Flywheel Limit";
       case CLEARING_JAM -> "Clearing Jam";
       case REVERSING_LOCAL -> "Reversing (Feeder/Indexer)";
       case REVERSING_FULL -> "Full Reverse (Eject)";

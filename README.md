@@ -51,16 +51,18 @@ Driver Station 编号 **1 优先于 0**，优先级同时适用于驾驶和所�
 
 LT 同时展开 intake 并吸球，松开后停止吸球但不自动收回。方向键左执行向内收回及机械归零校准。LB/RT 反转为点动式：反转输出按当前控制手柄的按住状态实时重算——控制手柄按住 LB 时吸球滚轮、Indexer、Feeder 反转（RT 仅 Indexer/Feeder），松开、断连、失去优先权且接管手柄未按住同一键、或机器人禁用时归零；反转不占用子系统，因此与射球同时进行时反转写入会被射球循环覆盖（沿用原有行为，本轮有意未改）。
 
-## 演示面板与送球门控
+## 演示面板与立即送料
 
-射球命令运行期间，送球全程受实时就绪门控：飞轮速度上限 > 0、Drum 达到目标转速、Hood 达到目标角度三者同时成立才允许送球。连射中途就绪失守即暂停 Feeder / Indexer / 吸球滚轮（Drum 与 Hood 保持原目标不变），恢复稳定就绪（0.15 s 防抖）后自动续打，无需松键重按；松键即结束命令。Manual（X）调参射球遵循同一规则。
+在机器人已使能且按键来源手柄拥有控制权时，按住既有射球键会立即送料：1 号/0 号 RB 的 `Shooting(false)`（普通速度模式）、0 号 A 的 `Shooting(true)`（Indexer 与 Feeder 保持 50 A 电流模式）以及 0 号 X 的 Manual，都在命令第一次 `execute` 就按各自原目标驱动 Indexer 与 Feeder；Drum 与 Hood 同时仍前往原目标，IntakeRoller 保持原运行逻辑。就绪许可只保留 `Flywheel Speed Limit (%) > 0` 这一项：0% 停止送料，调回任意正值的当拍恢复；Drum 转速未到或掉速、Hood 未到或偏离、目标中途改变以及 readiness debounce 都不再暂停、延迟或许可送料。这些射球路径不读取视觉、AprilTag、位姿或瞄准数据。松键、手柄断连、失去控制权、命令打断或机器人禁用仍会停止对应命令并停料。
 
-Elastic 演示页展示以下只读操作状态：
+自动清堵的阈值、确认、反向输出与时长保持不变；0% 暂停和 UNJAM 期间 retract 计时仍冻结。清堵完成后，只要命令仍在运行且飞轮速度上限大于 0%，就立即恢复原送料状态，不再等待转速/Hood 就绪或稳定窗。
+
+`Robot Action`、`Feed Allowed` 和 `Feed Blocked Reason` 继续反映命令的实际送料决定；`drumReady` / `hoodReady` / `stableReady` 仍按真实测量记录，仅作诊断，不参与送料许可。Elastic 演示页展示以下只读操作状态：
 
 - `Robot Action` / `Feed Allowed` / `Feed Blocked Reason`
 - `Drum Target Speed (rot/s)` / `Drum Actual Speed (rot/s)`
 
-以上门控行为与面板尚未在实车上验证。
+以上立即送料、清堵恢复行为与面板尚未在实车上验证。
 
 ## 构建与仿真
 

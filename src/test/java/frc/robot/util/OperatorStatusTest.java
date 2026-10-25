@@ -23,9 +23,9 @@ import org.junit.jupiter.api.Test;
 /**
  * OperatorStatus heartbeat and priority rules with an injected clock (same pattern as
  * BallFlowTrackerTest): expiry always falls back to IDLE — a released key, an interrupted command,
- * or a disable simply stops reporting — and among fresh reports the highest priority wins. The
- * blocked-reason layering is checked with DriverStationSim, explicitly reset to disabled after
- * every test so the enabled state cannot leak into other test classes.
+ * or a disable simply stops reporting. Active reversal/jam priorities are checked alongside the
+ * rule that fresh post-jam/post-pause feeding supersedes stale blocked heartbeats. DriverStationSim
+ * is explicitly reset to disabled after every test so enabled state cannot leak into other classes.
  */
 class OperatorStatusTest {
   private final double[] now = {0.0};
@@ -83,14 +83,15 @@ class OperatorStatusTest {
   }
 
   @Test
-  void jamOutranksFeedUntilItExpires() {
+  void jamOutranksFeedWhileClearingThenExpires() {
     OperatorStatus.report(Action.FEEDING);
     OperatorStatus.report(Action.CLEARING_JAM);
     assertEquals(Action.CLEARING_JAM, OperatorStatus.currentAction());
 
     advanceTo(0.10);
-    OperatorStatus.report(Action.FEEDING); // feeding keeps heartbeating, jam handling stopped
-    advanceTo(0.16); // the jam heartbeat (t=0) expired; feed (t=0.10) is still fresh
+    assertEquals(Action.CLEARING_JAM, OperatorStatus.currentAction(), "jam still being handled");
+    advanceTo(0.16);
+    OperatorStatus.report(Action.FEEDING);
     assertEquals(Action.FEEDING, OperatorStatus.currentAction());
   }
 
@@ -112,6 +113,7 @@ class OperatorStatusTest {
   @Test
   void disabledBlocksFeedRegardlessOfReports() {
     OperatorStatus.report(Action.FEEDING);
+    OperatorStatus.reportFeedDecision(true, ShotReadiness.REASON_NONE);
     OperatorStatus.update();
     assertEquals(Action.FEEDING, OperatorStatus.currentAction());
     assertEquals(ShotReadiness.REASON_DISABLED, OperatorStatus.feedBlockedReason());
@@ -119,18 +121,89 @@ class OperatorStatusTest {
   }
 
   @Test
-  void clearingJamBlocksAndExpiredJamWithReadyShotAllows() {
-    // DriverStation.isEnabled() is enabled && dsAttached; notifyNewData() refreshes the cache.
+  void freshFeedingDecisionSupersedesStaleJamHeartbeat() {
     DriverStationSim.setDsAttached(true);
     DriverStationSim.setEnabled(true);
     DriverStationSim.notifyNewData();
 
     OperatorStatus.report(Action.CLEARING_JAM);
+    OperatorStatus.reportFeedDecision(true, ShotReadiness.REASON_NONE);
     assertEquals(Action.CLEARING_JAM, OperatorStatus.currentAction());
     assertEquals(ShotReadiness.REASON_CLEARING_JAM, OperatorStatus.feedBlockedReason());
     assertFalse(OperatorStatus.feedAllowed());
 
-    // Make the shot genuinely ready: flywheel 100%, hood entry matching the settled position.
+    // The command has finished UNJAM and resumed feeding; the old jam heartbeat is still inside
+    // its 150 ms expiry but must not leave the panel blocked or reporting Clearing Jam.
+    advanceTo(0.10);
+    OperatorStatus.report(Action.FEEDING);
+    OperatorStatus.reportFeedDecision(true, ShotReadiness.REASON_NONE);
+    OperatorStatus.update();
+    assertEquals(Action.FEEDING, OperatorStatus.currentAction());
+    assertTrue(OperatorStatus.feedAllowed());
+    assertEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());
+  }
+
+  @Test
+  void positiveFlywheelAllowsFallbackWhileMeasurementsAreNotReady() {
+    DriverStationSim.setDsAttached(true);
+    DriverStationSim.setEnabled(true);
+    DriverStationSim.notifyNewData();
+    DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+    DashboardControlsTestUtil.set(HOOD, 100.0);
+    Drum.mInstance.setVelocityRotPerSec(0.0);
+    Hood.mInstance.setPositionRot(0.0);
+    stepMechanisms();
+    stepMechanisms();
+
+    OperatorStatus.update();
+    assertEquals(Action.IDLE, OperatorStatus.currentAction());
+    assertTrue(
+        OperatorStatus.feedAllowed(),
+        "drum/hood measurements are diagnostics, not feed permission");
+    assertEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());
+
+    OperatorStatus.publish(0);
+    assertTrue(
+        NetworkTableInstance.getDefault()
+            .getEntry("/SmartDashboard/Feed Allowed")
+            .getBoolean(false));
+    assertEquals(
+        "",
+        NetworkTableInstance.getDefault()
+            .getEntry("/SmartDashboard/Feed Blocked Reason")
+            .getString("missing"));
+    assertEquals(
+        "Idle",
+        NetworkTableInstance.getDefault().getEntry("/SmartDashboard/Robot Action").getString(""));
+  }
+
+  @Test
+  void zeroFlywheelBlocksAndPositiveRecoveryClearsDecision() {
+    DriverStationSim.setDsAttached(true);
+    DriverStationSim.setEnabled(true);
+    DriverStationSim.notifyNewData();
+    DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
+    OperatorStatus.report(Action.WAITING_RECOVERY);
+    OperatorStatus.reportFeedDecision(false, ShotReadiness.REASON_FLYWHEEL_ZERO);
+    OperatorStatus.update();
+    assertFalse(OperatorStatus.feedAllowed());
+    assertEquals(ShotReadiness.REASON_FLYWHEEL_ZERO, OperatorStatus.feedBlockedReason());
+
+    DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+    advanceTo(0.02);
+    OperatorStatus.report(Action.FEEDING);
+    OperatorStatus.reportFeedDecision(true, ShotReadiness.REASON_NONE);
+    OperatorStatus.update();
+    assertEquals(Action.FEEDING, OperatorStatus.currentAction());
+    assertTrue(OperatorStatus.feedAllowed());
+    assertEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());
+  }
+
+  @Test
+  void clearFeedDecisionRestoresFallbackImmediately() {
+    DriverStationSim.setDsAttached(true);
+    DriverStationSim.setEnabled(true);
+    DriverStationSim.notifyNewData();
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
     DashboardControlsTestUtil.set(HOOD, 100.0);
     Drum.mInstance.setVelocityRotPerSec(DrumConstants.MaxShotVelocity);
@@ -138,10 +211,12 @@ class OperatorStatusTest {
     stepMechanisms();
     stepMechanisms();
 
-    // The jam heartbeat expired with no re-report — the panel recovers on its own.
-    advanceTo(0.20);
+    OperatorStatus.reportFeedDecision(false, ShotReadiness.REASON_FLYWHEEL_ZERO);
+    assertFalse(OperatorStatus.feedAllowed());
+    assertEquals(ShotReadiness.REASON_FLYWHEEL_ZERO, OperatorStatus.feedBlockedReason());
+
+    OperatorStatus.clearFeedDecision();
     OperatorStatus.update();
-    assertEquals(Action.IDLE, OperatorStatus.currentAction());
     assertTrue(OperatorStatus.feedAllowed());
     assertEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());
   }
@@ -152,6 +227,15 @@ class OperatorStatusTest {
     OperatorStatus.publish(0);
     assertEquals(
         "Intaking",
+        NetworkTableInstance.getDefault().getEntry("/SmartDashboard/Robot Action").getString(""));
+  }
+
+  @Test
+  void publishWaitingRecoveryUsesFlywheelLimitLabel() {
+    OperatorStatus.report(Action.WAITING_RECOVERY);
+    OperatorStatus.publish(0);
+    assertEquals(
+        "Waiting for Flywheel Limit",
         NetworkTableInstance.getDefault().getEntry("/SmartDashboard/Robot Action").getString(""));
   }
 }
