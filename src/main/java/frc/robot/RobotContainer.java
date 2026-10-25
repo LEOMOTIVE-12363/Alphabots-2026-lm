@@ -137,7 +137,7 @@ public class RobotContainer {
     configureButtonBindings();
   }
 
-  /** Bind the five demo actions on both ports, and the remaining actions on port 0 only. */
+  /** Bind shared and full-only actions, plus the demo pad's two LED selectors. */
   private void configureButtonBindings() {
     drive.setDefaultCommand(
         DriveCommands.joystickDrive(
@@ -189,6 +189,9 @@ public class RobotContainer {
                       }
                     })
                 .ignoringDisable(true));
+    controls.onDemoPress(Action.CYCLE_LED_THEME, () -> Commands.runOnce(led::cycleTheme));
+    controls.onDemoPress(
+        Action.CYCLE_LED_IDLE_EFFECT, () -> Commands.runOnce(led::cycleIdleEffect));
   }
 
   private Command resetHeadingCommand() {

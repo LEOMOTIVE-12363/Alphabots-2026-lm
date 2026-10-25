@@ -134,7 +134,7 @@ class LEDBehaviorTest {
     if (savedLegacyFollowExists) {
       NetworkTableInstance.getDefault().getEntry(LEGACY_FLOW_KEY).setBoolean(savedLegacyFollow);
     } else {
-      NetworkTableInstance.getDefault().getEntry(LEGACY_FLOW_KEY).clearValue();
+      NetworkTableInstance.getDefault().getEntry(LEGACY_FLOW_KEY).unpublish();
     }
     setBrightness(savedBrightness);
     restorePersisted(

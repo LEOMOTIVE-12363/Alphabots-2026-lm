@@ -1518,10 +1518,10 @@ class TeleopIntegrationTest {
   // ---------------------------------------------------------------------------
 
   @Test
-  void portOneDpadUpDownAndStartTriggerNothing() throws InterruptedException {
+  void portOneDpadUpDownAndStartDoNotTriggerFullOnlyActions() throws InterruptedException {
     // D-pad up/down (flywheel nudge) and Start (sim field reset) are full-port-only actions; on
-    // the demo pad none of them may do anything. The flywheel entry and the pose make both
-    // observable without touching the mechanism.
+    // the demo pad neither full-only action may fire. Start may still cycle the LED idle effect
+    // through its separate demo binding; the flywheel entry and pose check the two full-only paths.
     connect(1);
     teleport(new Pose2d(3.0, 2.0, Rotation2d.kZero));
     settleToPublish();
