@@ -1121,7 +1121,17 @@ class TeleopIntegrationTest {
         "intake roller is running");
     assertEquals(0.0, feederSetpoint(), EPS, "Shooting was interrupted, feeder stopped");
 
-    setTrigger(1, 0.0); // release LT
+    // LT is a latch now (2026-10-26): releasing it does NOT stop the intake — a second press
+    // toggles it back off so the rest of this test runs against a stopped feed path.
+    setTrigger(1, 0.0);
+    setTrigger(1, 0.9);
+    setTrigger(1, 0.0);
+    settle();
+    assertEquals(
+        0.0,
+        IntakeRoller.mInstance.getVelocitySetpointRotPerSec(),
+        EPS,
+        "second press stops intake");
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
     for (int i = 0; i < 25; i++) {
       stepRobot();
@@ -1354,6 +1364,140 @@ class TeleopIntegrationTest {
     release(1, BUTTON_LB);
     settle();
     assertEquals(0.0, Feeder.mInstance.getVoltageSetpoint(), EPS, "release zeroes");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Latched intake toggle (2026-10-26): LT press-on / press-off, eject takes over
+  // ---------------------------------------------------------------------------
+
+  /** True once the intake roller has a non-zero velocity request (the latched intake's mode). */
+  private static boolean intakeRollerRunning() {
+    return IntakeRoller.mInstance.getVelocitySetpointRotPerSec() != 0.0;
+  }
+
+  /** One full LT press: the rising edge through the 0.1 axis threshold is one toggle step. */
+  private static void pressIntakeToggle(int port) {
+    setTrigger(port, 0.9);
+    setTrigger(port, 0.0);
+  }
+
+  @Test
+  void intakePressTogglesAndSecondPressStops() {
+    connect(1);
+    pressIntakeToggle(1); // first press: latch on
+    boolean running = false;
+    for (int i = 0; i < 10 && !running; i++) {
+      stepRobot();
+      running = intakeRollerRunning();
+    }
+    assertTrue(running, "first press starts intake");
+
+    // Releasing LT must not stop it — the latch keeps the command scheduled, and the operator
+    // panel keeps showing the live INTAKING heartbeat rather than falling back to Idle.
+    settleToPublish();
+    assertEquals("Intaking", robotAction());
+    for (int i = 0; i < 25; i++) {
+      stepRobot();
+      assertTrue(intakeRollerRunning(), "intake keeps running after release, loop " + i);
+    }
+
+    pressIntakeToggle(1); // second press: latch off
+    settle();
+    assertEquals(
+        0.0,
+        IntakeRoller.mInstance.getVelocitySetpointRotPerSec(),
+        EPS,
+        "second press stops intake");
+  }
+
+  @Test
+  void ejectPressStopsLatchedIntakeAndOuttakesWhileHeld() {
+    connect(1);
+    pressIntakeToggle(1);
+    boolean running = false;
+    for (int i = 0; i < 10 && !running; i++) {
+      stepRobot();
+      running = intakeRollerRunning();
+    }
+    assertTrue(running, "intake latched on before the outtake");
+
+    press(1, BUTTON_LB); // outtake press: stop the latch AND reverse the feed path
+    settle();
+    assertTrue(
+        IntakeRoller.mInstance.getVoltageSetpoint() < -1.0,
+        "roller reversed while LB held, got " + IntakeRoller.mInstance.getVoltageSetpoint());
+    assertTrue(
+        Feeder.mInstance.getVoltageSetpoint() < -1.0,
+        "feeder reversed, got " + Feeder.mInstance.getVoltageSetpoint());
+    assertTrue(
+        Indexer.mInstance.getVoltageSetpoint() < -1.0,
+        "indexer reversed, got " + Indexer.mInstance.getVoltageSetpoint());
+    for (int i = 0; i < 10; i++) {
+      stepRobot();
+      assertTrue(
+          IntakeRoller.mInstance.getVoltageSetpoint() < -1.0,
+          "outtake holds while LB held, loop " + i);
+    }
+
+    release(1, BUTTON_LB);
+    settle();
+    assertEquals(0.0, IntakeRoller.mInstance.getVoltageSetpoint(), EPS, "release zeroes");
+    for (int i = 0; i < 25; i++) {
+      stepRobot();
+      assertEquals(
+          0.0,
+          IntakeRoller.mInstance.getVelocitySetpointRotPerSec(),
+          EPS,
+          "intake must not resume after the outtake, loop " + i);
+    }
+
+    pressIntakeToggle(1); // a fresh press latches intake back on
+    running = false;
+    for (int i = 0; i < 10 && !running; i++) {
+      stepRobot();
+      running = intakeRollerRunning();
+    }
+    assertTrue(running, "fresh press restarts intake");
+  }
+
+  @Test
+  void disableStopsLatchedIntakeAndReenableDoesNotResumeIt() {
+    connect(1);
+    pressIntakeToggle(1);
+    boolean running = false;
+    for (int i = 0; i < 10 && !running; i++) {
+      stepRobot();
+      running = intakeRollerRunning();
+    }
+    assertTrue(running, "intake latched on");
+
+    DriverStationSim.setEnabled(false);
+    stepRobot();
+    settle();
+    assertEquals(
+        0.0,
+        IntakeRoller.mInstance.getVelocitySetpointRotPerSec(),
+        EPS,
+        "disable cancels the latched intake");
+
+    DriverStationSim.setEnabled(true);
+    DriverStationSim.notifyNewData();
+    for (int i = 0; i < 10; i++) {
+      stepRobot();
+      assertEquals(
+          0.0,
+          IntakeRoller.mInstance.getVelocitySetpointRotPerSec(),
+          EPS,
+          "re-enable must not resume the latch, loop " + i);
+    }
+
+    pressIntakeToggle(1); // explicit re-press works
+    running = false;
+    for (int i = 0; i < 10 && !running; i++) {
+      stepRobot();
+      running = intakeRollerRunning();
+    }
+    assertTrue(running, "re-press after re-enable restarts intake");
   }
 
   @Test

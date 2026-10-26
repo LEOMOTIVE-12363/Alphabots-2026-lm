@@ -67,6 +67,15 @@ public class RobotContainer {
   // Port 1 is the preferred demo controller; port 0 retains the full original controls.
   private final DriverControls controls = new DriverControls();
 
+  // Latched intake (2026-10-26): LT is press-on / press-off instead of hold-to-run. The latch
+  // state is exactly "latchedIntake.isScheduled()" — the onlyWhile guard tears it down when its
+  // source port disconnects or loses priority, and the scheduler cancels it on disable, so
+  // neither resumes by itself; the operator presses LT again. intakeLatchSource records which
+  // port owns the running latch for that guard.
+  private int intakeLatchSource = -1;
+  private final Command latchedIntake =
+      new IntakeCommand().onlyWhile(() -> controls.activePort() == intakeLatchSource);
+
   /** The container for the robot. Contains subsystems, OI devices, and commands. */
   public RobotContainer() {
     switch (Constants.currentMode) {
@@ -153,9 +162,12 @@ public class RobotContainer {
         Action.RETRACT,
         () -> new IntakeDeployZeroCommand(IntakeDeployZeroCommand.Direction.INWARD));
     controls.onPress(Action.RESET_HEADING, this::resetHeadingCommand);
-    controls.whileHeld(Action.INTAKE, IntakeCommand::new);
+    controls.onPress(Action.INTAKE, this::intakeToggleCommand);
     controls.whileHeld(Action.SHOOT, () -> new Shooting(false));
     controls.onPress(Action.EJECT, this::reverseFeedPressCommand);
+    // The outtake press also drops the intake latch — see stopLatchedIntakeCommand for why this
+    // is a separate poll-phase binding rather than part of applyReverseFeedDesired.
+    controls.onPress(Action.EJECT, this::stopLatchedIntakeCommand);
     controls.onRelease(Action.EJECT, this::reverseFeedReleaseCommand);
     controls.whileHeld(Action.EJECT, () -> reverseFeedHeartbeatCommand(true));
 
@@ -224,6 +236,48 @@ public class RobotContainer {
   // write gets clobbered (feeder read 0 V until re-press).
   private Command reverseFeedPressCommand() {
     return reverseFeedApplyCommand(false);
+  }
+
+  /**
+   * Toggles the latched intake (2026-10-26): first press schedules it until further notice, second
+   * press cancels. The toggle runs during the button poll — an InstantCommand's initialize fires at
+   * schedule time, before the scheduler sets m_inRunLoop — so schedule() and cancel() here take the
+   * scheduler's immediate path and isScheduled() reflects the latch the moment this returns. A
+   * press while disabled is dropped by the scheduler before the toggle runs, so nothing latches
+   * across a disable; only the port that currently has control can toggle, and a
+   * disconnect/priority loss tears the running latch down via onlyWhile.
+   */
+  private Command intakeToggleCommand() {
+    return Commands.runOnce(
+        () -> {
+          if (latchedIntake.isScheduled()) {
+            latchedIntake.cancel();
+            intakeLatchSource = -1;
+          } else {
+            intakeLatchSource = controls.activePort();
+            latchedIntake.schedule();
+            if (!latchedIntake.isScheduled()) {
+              intakeLatchSource = -1; // scheduler dropped it (e.g. disabled): not latched
+            }
+          }
+        });
+  }
+
+  /**
+   * An outtake press takes over the feed path: cancel the latched intake in the button poll so its
+   * end() zero-writes land BEFORE the execute-phase -3 V reverse recompute of
+   * applyReverseFeedDesired. Cancelling from inside that recompute instead would defer the latch's
+   * end() to loop end (WPILib 2026 queues in-loop cancels into m_toCancelCommands, processed after
+   * the execute phase) and the zeros would overwrite the fresh reverse outputs.
+   */
+  private Command stopLatchedIntakeCommand() {
+    return Commands.runOnce(
+        () -> {
+          if (latchedIntake.isScheduled()) {
+            latchedIntake.cancel();
+            intakeLatchSource = -1;
+          }
+        });
   }
 
   private Command reverseFeedReleaseCommand() {
