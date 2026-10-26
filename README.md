@@ -52,7 +52,7 @@ Driver Station 编号 **1 优先于 0**，优先级同时适用于驾驶和所�
 
 1 号 Back 按 Marigold Bridge → Festival Night → Alebrije Glow 循环三套主题（Off 仅在面板选择），Start 按 Static → Breathe → Slow Flow → Chase → Color Step 循环五种待机动画；每次按下只前进一项。两者直接操作现有 `LED Pattern` / `LED Idle Effect` chooser，手柄或 Elastic 任一端改变后，另一端同步显示实际选择，并沿用现有断电持久化。切换主题仍自动预选推荐动画，之后可用 Start 或 Elastic 覆盖；Off 下 Back 进入 Marigold Bridge，Start 无任何效果、不会点亮灯带。0 号 Back 未绑定，0 号 Start 仍仅用于仿真场地重置。
 
-LT 同时展开 intake 并吸球，松开后停止吸球但不自动收回。方向键左执行向内收回及机械归零校准。LB/RT 反转为点动式：反转输出按当前控制手柄的按住状态实时重算——控制手柄按住 LB 时吸球滚轮、Indexer、Feeder 反转（RT 仅 Indexer/Feeder），松开、断连、失去优先权且接管手柄未按住同一键、或机器人禁用时归零；反转不占用子系统，因此与射球同时进行时反转写入会被射球循环覆盖（沿用原有行为，本轮有意未改）。
+LT 为开关式（2026-10-26 起）：按一下展开 intake 并开始持续吸球，再按一下 LT 停止吸球（intake 保持展开、不自动收回）；机器人禁用或控制手柄断连/失去优先权时同样停止且不会自行恢复，需重新按 LT。按住 LB 吐球时若吸球仍在进行，会先停止吸球再开始吐球；松开 LB 后吐球停止，吸球不会自动恢复。方向键左执行向内收回及机械归零校准。LB/RT 反转为点动式：反转输出按当前控制手柄的按住状态实时重算——控制手柄按住 LB 时吸球滚轮、Indexer、Feeder 反转（RT 仅 Indexer/Feeder；RT 不打断进行中的吸球），松开、断连、失去优先权且接管手柄未按住同一键、或机器人禁用时归零；反转不占用子系统，因此与射球同时进行时反转写入会被射球循环覆盖（沿用原有行为，本轮有意未改）。
 
 ## 演示面板与立即送料
 
