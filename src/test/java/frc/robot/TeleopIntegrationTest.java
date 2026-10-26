@@ -1360,7 +1360,7 @@ class TeleopIntegrationTest {
     Hood.mInstance.periodic();
 
     assertHoodPositionTarget(
-        25.0 / 360.0, "100% must request 25 degrees while no shot command owns the hood");
+        45.0 / 360.0, "100% must request 45 degrees while no shot command owns the hood");
     assertEquals(0.0, feederSetpoint(), EPS, "hood-only dashboard edit must not start feeding");
     assertEquals(0.0, feederAmps(), EPS, "hood-only dashboard edit must not request feed current");
 
@@ -1369,7 +1369,7 @@ class TeleopIntegrationTest {
     Hood.mInstance.periodic();
 
     assertHoodPositionTarget(
-        10.0 / 360.0, "40% must request 10 degrees on the following scheduler cycle");
+        18.0 / 360.0, "40% must request 18 degrees on the following scheduler cycle");
     assertEquals(
         0.0, feederSetpoint(), EPS, "the second hood edit must also leave feeding stopped");
     assertEquals(0.0, feederAmps(), EPS, "the second hood edit must not request feed current");
@@ -1391,7 +1391,7 @@ class TeleopIntegrationTest {
           0.0,
           Hood.mInstance.getPositionSetpointRot(),
           EPS,
-          "disabled loop " + i + " must not write the pending 25 degree target");
+          "disabled loop " + i + " must not write the pending 45 degree target");
     }
 
     DriverStationSim.setEnabled(true);
@@ -1404,7 +1404,7 @@ class TeleopIntegrationTest {
     stepRobot();
     Hood.mInstance.periodic();
     assertHoodPositionTarget(
-        25.0 / 360.0, "the second enabled scheduler cycle must apply the pending 25 degree target");
+        45.0 / 360.0, "the second enabled scheduler cycle must apply the pending 45 degree target");
   }
 
   @Test
@@ -1420,7 +1420,7 @@ class TeleopIntegrationTest {
       press(0, BUTTON_X);
       settle();
       assertHoodPositionTarget(
-          5.0 / 360.0, "Manual must keep its own 5 degree target, not the dashboard's 25 degrees");
+          5.0 / 360.0, "Manual must keep its own 5 degree target, not the dashboard's 45 degrees");
 
       DashboardControlsTestUtil.set(HOOD, 40.0);
       stepRobot();
@@ -1432,7 +1432,7 @@ class TeleopIntegrationTest {
       settle();
       settle();
       assertHoodPositionTarget(
-          10.0 / 360.0, "after Manual ends, idle following must apply the latest dashboard target");
+          18.0 / 360.0, "after Manual ends, idle following must apply the latest dashboard target");
     } finally {
       overrideTunable(ManualConstants.HoodDegTunable, "Manual/HoodDegree", originalManualHoodDeg);
     }
@@ -1450,7 +1450,7 @@ class TeleopIntegrationTest {
         ShootingConstants.IndexerRotpsTunable.getAsDouble(),
         ShootingConstants.FeederRotpsTunable.getAsDouble());
     assertHoodPositionTarget(
-        25.0 / 360.0, "Shooting must own the hood and feed before it is ready");
+        45.0 / 360.0, "Shooting must own the hood and feed before it is ready");
 
     DashboardControlsTestUtil.set(HOOD, 40.0);
     stepRobot();
@@ -1459,14 +1459,14 @@ class TeleopIntegrationTest {
         ShootingConstants.IndexerRotpsTunable.getAsDouble(),
         ShootingConstants.FeederRotpsTunable.getAsDouble());
     assertHoodPositionTarget(
-        10.0 / 360.0, "the active Shooting command must follow the new hood target");
+        18.0 / 360.0, "the active Shooting command must follow the new hood target");
 
     release(0, BUTTON_RB);
     settle();
     settle();
     Hood.mInstance.periodic();
     assertHoodPositionTarget(
-        10.0 / 360.0, "after Shooting ends, idle following must restore the latest target");
+        18.0 / 360.0, "after Shooting ends, idle following must restore the latest target");
     assertFeedPathStopped();
   }
 
@@ -1507,8 +1507,8 @@ class TeleopIntegrationTest {
       stepRobot();
     }
     assertHoodPositionTarget(
-        10.0 / 360.0,
-        "after HoodZero ends, idle following must restore the latest 10 degree target");
+        18.0 / 360.0,
+        "after HoodZero ends, idle following must restore the latest 18 degree target");
     release(0, BUTTON_Y);
   }
 
