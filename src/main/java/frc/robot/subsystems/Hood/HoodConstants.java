@@ -24,11 +24,13 @@ public final class HoodConstants {
   public static final double HoodZeroPosition = 0.0;
 
   // Hood Angle (%) range in mechanism degrees (position rot * 360). 0% is the zeroed hard stop
-  // (fully lowered, steepest shot); 100% is 25 deg, the largest angle the calibrated shot tables
-  // ever commanded (ferry table max). No upper soft limit is configured on the Talon, so this is
-  // the enforced ceiling — raise it only after measuring the real mechanical travel.
+  // (fully lowered, steepest shot); 100% is 45 deg, raised 2026-10-26 by operator request so the
+  // hood can nearly fully deploy. This is above the calibrated shot tables (their max was the 25
+  // deg ferry table), and the real mechanical travel is still unmeasured — verify 45 deg against
+  // the physical stop. No upper soft limit is configured on the Talon, so this is the enforced
+  // ceiling.
   public static final double MinAngleDeg = HoodZeroPosition * 360.0;
-  public static final double MaxAngleDeg = 25.0;
+  public static final double MaxAngleDeg = 45.0;
 
   public static final MotorIOPhoenix6Config Hood_CONFIG =
       new MotorIOPhoenix6Config(Hood_ID, CAN_BUS)
