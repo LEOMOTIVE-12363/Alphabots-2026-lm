@@ -29,7 +29,7 @@
 | 分支 | 内容 |
 |---|---|
 | `main` | 上游 Alphabots 8810 竞赛代码基线，保留本 fork 的 MIT LICENSE、双语 README 与私有配置退跟踪改动：完整自动程序（Choreo 轨迹 + PathPlanner）、视觉、战术程序 |
-| `demo` | **LEOMOTIVE demo 展示线**（本仓库的日常开发线）：移除全部自动程序与视觉，纯手动驾驶；Elastic 数值输入框直控 Drum 转速 / Hood 俯仰，并新增 demo 调参页；可寻址 LED 灯带（亡灵节三套主题配色＋Off——2026-10-26 起菜单精简为这四项，纯色/彩虹/追逐/呼吸独立模式与 Papel Fiesta / Candle Memory 主题已删，旧保存值安全回退默认；`LED Pattern` / `LED Idle Effect` / `LED Brightness (%)` 由 Elastic 选择并断电持久化，Enable、Disable、空闲、吸球、射球、吐球时都保持同一所选样式，Slow Flow / Chase / Breathe 等用户所选动画仍随时间播放；`Follow Ball Flow` 开关已移除；灯带分段与动画参数待实灯核验；CANdle 已选定为默认驱动，PWM 保留为编译期备用；改 `LEDConstants.HARDWARE` 一个常量即可切换，硬件安装参数与实灯表现仍待核验） |
+| `demo` | **LEOMOTIVE demo 展示线**（本仓库的日常开发线）：移除全部自动程序与视觉，纯手动驾驶；Elastic 数值输入框直控 Drum 转速 / Hood 俯仰，并新增 demo 调参页；可寻址 LED 灯带（五套《Coco》亡灵节主题＋Off 与纯色/彩虹/追逐/呼吸四个独立模式（2026-10-26 曾精简为三主题＋Off，同日按用户要求全部恢复）；五套主题自 2026-10-26 起统一渲染同一套**橙紫交替融合渐变**（紫 `#7020D0` ↔ 橙 `#FF7900`，路径四等分 ABAB 波段，两端收紫），仅名称与推荐待机动画不同；配置总长 7.0 m 对齐实装灯带；`LED Pattern` / `LED Idle Effect` / `LED Brightness (%)` 由 Elastic 选择并断电持久化，Enable、Disable、空闲、吸球、射球、吐球时都保持同一所选样式，Slow Flow / Chase / Breathe 等用户所选动画仍随时间播放；`Follow Ball Flow` 开关已移除；灯带分段与动画参数待实灯核验；CANdle 已选定为默认驱动，PWM 保留为编译期备用；改 `LEDConstants.HARDWARE` 一个常量即可切换，硬件安装参数与实灯表现仍待核验） |
 
 - demo 展示线的功能改动**永不合入 `main`**；每个任务一个独立 PR，base 为 `demo`，自检通过后即合入。仓库共用的中英 README 同步维护：从 `demo` 发起文档改动，再以独立 PR 将相同文案同步至 `main`。
 - 查看 `demo` 相对 `main` 的全部差异，请使用 GitHub Compare：[compare/main...demo](https://github.com/LEOMOTIVE-12363/Alphabots-2026-lm/compare/main...demo)（原先长期保持 open 的总览 PR #2 已于 2026-10-23 关闭，无须常驻 open PR）。
@@ -50,7 +50,7 @@ Driver Station 编号 **1 优先于 0**，优先级同时适用于驾驶和所�
 | 循环 LED 主题 / 待机动画 | Back / Start | 无 LED 切换 |
 | 重置仿真场地（实车无效） | 无 | Start |
 
-1 号 Back 按 Marigold Bridge → Festival Night → Alebrije Glow 循环三套主题（Off 仅在面板选择），Start 按 Static → Breathe → Slow Flow → Chase → Color Step 循环五种待机动画；每次按下只前进一项。两者直接操作现有 `LED Pattern` / `LED Idle Effect` chooser，手柄或 Elastic 任一端改变后，另一端同步显示实际选择，并沿用现有断电持久化。切换主题仍自动预选推荐动画，之后可用 Start 或 Elastic 覆盖；Off 下 Back 进入 Marigold Bridge，Start 无任何效果、不会点亮灯带。0 号 Back 未绑定，0 号 Start 仍仅用于仿真场地重置。
+1 号 Back 按 Marigold Bridge → Festival Night → Papel Fiesta → Alebrije Glow → Candle Memory 循环五套主题，Start 按 Static → Breathe → Slow Flow → Chase → Color Step 循环五种待机动画；每次按下只前进一项。两者直接操作现有 `LED Pattern` / `LED Idle Effect` chooser，手柄或 Elastic 任一端改变后，另一端同步显示实际选择，并沿用现有断电持久化。切换主题仍自动预选推荐动画，之后可用 Start 或 Elastic 覆盖；Off 与四个独立模式下 Back 进入 Marigold Bridge，Start 不改变任何选择。0 号 Back 未绑定，0 号 Start 仍仅用于仿真场地重置。
 
 LT 为开关式（2026-10-26 起）：按一下展开 intake 并开始持续吸球，再按一下 LT 停止吸球（intake 保持展开、不自动收回）；机器人禁用或控制手柄断连/失去优先权时同样停止且不会自行恢复，需重新按 LT。按住 LB 吐球时若吸球仍在进行，会先停止吸球再开始吐球；松开 LB 后吐球停止，吸球不会自动恢复。方向键左执行向内收回及机械归零校准。LB/RT 反转为点动式：反转输出按当前控制手柄的按住状态实时重算——控制手柄按住 LB 时吸球滚轮、Indexer、Feeder 反转（RT 仅 Indexer/Feeder；RT 不打断进行中的吸球），松开、断连、失去优先权且接管手柄未按住同一键、或机器人禁用时归零；反转不占用子系统，因此与射球同时进行时反转写入会被射球循环覆盖（沿用原有行为，本轮有意未改）。
 
@@ -71,7 +71,7 @@ LT 为开关式（2026-10-26 起）：按一下展开 intake 并开始持续吸�
 
 `elastic-layout-1026.json` 的 `LED Preview` 页提供独立于实灯输出的配色与动画预览。使用时必须正在运行机器人代码或桌面仿真，并将 Elastic 连接到该进程的 NetworkTables；仅打开布局不会产生预览数据。
 
-- 顶部 `LED Pattern` 与 `LED Idle Effect` 沿用现有设置键。大的 `Current Selection` 卡片预览当前 Pattern（主题 Pattern 使用当前 Idle Effect）；下方三张固定卡片分别展示 Marigold Bridge / Slow Flow、Festival Night / Breathe、Alebrije Glow / Slow Flow 的主题与推荐效果。
+- 顶部 `LED Pattern` 与 `LED Idle Effect` 沿用现有设置键。大的 `Current Selection` 卡片预览当前 Pattern（主题 Pattern 使用当前 Idle Effect）；下方五张固定卡片分别展示 Marigold Bridge / Slow Flow、Festival Night / Breathe、Papel Fiesta / Chase、Alebrije Glow / Slow Flow、Candle Memory / Static 的主题与推荐效果（五套主题现为同一套橙紫融合配色，卡片以推荐动画区分）。
 - 所有卡片按固定参考亮度生成，不读取或显示实灯状态或实际亮度；`LED Brightness (%)` 不缩放预览，吸球、射球、吐球等机制动作也不会打断或替换预览。
 - 预览用于比较主题与效果，不代表实灯颜色或亮度；屏幕颜色不能用来核验实灯色序、亮度、供电或分段。机器人 `Disabled` 时预览仍可用；`REPLAY` 不发布这些预览话题，因此回放不会填充此页。
 
