@@ -21,10 +21,10 @@ class LEDThemeTest {
   private static final double CHANNEL_EPS = 1.0 / 255.0 + 1e-9;
   private static final double EPS = 1e-9;
 
-  // The unified fusion design: purple #7020D0 and orange #FF7900 alternating every 0.3 m of
+  // The unified fusion design: purple #7020D0 and orange #FF6600 alternating every 0.3 m of
   // LEDConstants.LENGTH_METERS (the tests re-derive the stop positions independently).
   private static final int[] PURPLE = {112, 32, 208};
-  private static final int[] ORANGE = {255, 121, 0};
+  private static final int[] ORANGE = {255, 102, 0}; // #FF6600 safety orange (deepened 2026-10-26)
   private static final double BAND_METERS = 0.3;
 
   private static void assertStop(LEDTheme theme, double u, int r, int g, int b) {
@@ -77,12 +77,12 @@ class LEDThemeTest {
 
   @Test
   void segmentMidpointIsAPerChannelRgbSmoothstep() {
-    // The first stripe runs u in [0, 0.3/LENGTH] from #7020D0 to #FF7900. At the stripe midpoint
+    // The first stripe runs u in [0, 0.3/LENGTH] from #7020D0 to #FF6600. At the stripe midpoint
     // smoothstep(0.5) = 0.5, so every channel is the plain average of the two stop channels.
     double midU = (BAND_METERS / 2.0) / LEDConstants.LENGTH_METERS;
     Color mid = LEDTheme.FESTIVAL_NIGHT.colorAt(midU);
     assertEquals((112.0 + 255.0) / 2.0 / 255.0, mid.red, CHANNEL_EPS, "midpoint red");
-    assertEquals((32.0 + 121.0) / 2.0 / 255.0, mid.green, CHANNEL_EPS, "midpoint green");
+    assertEquals((32.0 + 102.0) / 2.0 / 255.0, mid.green, CHANNEL_EPS, "midpoint green");
     assertEquals((208.0 + 0.0) / 2.0 / 255.0, mid.blue, CHANNEL_EPS, "midpoint blue");
   }
 
@@ -98,7 +98,7 @@ class LEDThemeTest {
       assertTrue(c.red >= 112.0 / 255.0 - CHANNEL_EPS, "red below envelope " + where);
       assertTrue(c.red <= 255.0 / 255.0 + CHANNEL_EPS, "red above envelope " + where);
       assertTrue(c.green >= 32.0 / 255.0 - CHANNEL_EPS, "green below envelope " + where);
-      assertTrue(c.green <= 121.0 / 255.0 + CHANNEL_EPS, "green above envelope " + where);
+      assertTrue(c.green <= 102.0 / 255.0 + CHANNEL_EPS, "green above envelope " + where);
       assertTrue(c.blue >= 0.0 - CHANNEL_EPS, "blue below envelope " + where);
       assertTrue(c.blue <= 208.0 / 255.0 + CHANNEL_EPS, "blue above envelope " + where);
     }
