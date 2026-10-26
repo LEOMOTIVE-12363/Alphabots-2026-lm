@@ -11,6 +11,7 @@ import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import frc.lib.rebuilt.ShiftUtil;
 import frc.robot.simulation.FuelSimulation;
 import frc.robot.simulation.MapleSimArena;
+import frc.robot.subsystems.Drum.Drum;
 import frc.robot.util.DashboardControls;
 import frc.robot.util.OperatorStatus;
 import org.littletonrobotics.junction.LogFileUtil;
@@ -129,9 +130,14 @@ public class Robot extends LoggedRobot {
     // Threads.setCurrentThreadPriority(false, 10);
   }
 
-  /** This function is called once when the robot is disabled. */
+  /**
+   * This function is called once when the robot is disabled. Clear any standing drum request so
+   * re-enabling can never spin the shooter back up on its own; the drum coasts out instead.
+   */
   @Override
-  public void disabledInit() {}
+  public void disabledInit() {
+    Drum.mInstance.stop();
+  }
 
   /** This function is called periodically when disabled. */
   @Override

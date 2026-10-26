@@ -1149,7 +1149,10 @@ class TeleopIntegrationTest {
     stepRobot();
     settle();
     assertEquals(0.0, feederSetpoint(), EPS, "disable canceled the volley (end() stopped feed)");
-    assertEquals(DrumConstants.StowVelocity, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+    assertEquals(
+        MotorIO.ControlMode.DISABLED,
+        Drum.mInstance.getControlMode(),
+        "disable left the drum stopped");
 
     // Re-enable with the button still held: record actual behavior — no new rising edge.
     DriverStationSim.setEnabled(true);
@@ -1157,10 +1160,11 @@ class TeleopIntegrationTest {
     for (int i = 0; i < 25; i++) {
       stepRobot();
       assertEquals(
-          DrumConstants.StowVelocity,
-          Drum.mInstance.getVelocitySetpointRotPerSec(),
-          EPS,
-          "held-through-disable button does not restart, loop " + i);
+          0.0, feederSetpoint(), EPS, "held-through-disable button does not restart, loop " + i);
+      assertEquals(
+          MotorIO.ControlMode.DISABLED,
+          Drum.mInstance.getControlMode(),
+          "re-enable must not spin the drum back up, loop " + i);
     }
 
     release(1, BUTTON_RB);
@@ -1226,6 +1230,48 @@ class TeleopIntegrationTest {
     release(1, BUTTON_RB);
   }
 
+  /**
+   * The reported field scenario: shoot, release, disable, wait, re-enable with nobody touching the
+   * sticks. The drum must stay stopped on re-enable — end() may not leave a standing velocity
+   * request for the motor controller to resume.
+   */
+  @Test
+  void reEnableAfterReleasedShotLeavesDrumStopped() {
+    connect(1);
+    press(1, BUTTON_RB);
+    assertTrue(stepUntilFeeding(40), "reached SHOOT");
+
+    release(1, BUTTON_RB);
+    settle();
+    assertEquals(
+        MotorIO.ControlMode.DISABLED,
+        Drum.mInstance.getControlMode(),
+        "releasing the shot button leaves no standing drum request");
+    assertEquals(0.0, feederSetpoint(), EPS);
+
+    DriverStationSim.setEnabled(false);
+    stepRobot();
+    settle();
+    for (int i = 0; i < 100; i++) {
+      stepRobot(); // long disabled stretch; nothing may revive the drum request
+    }
+    DriverStationSim.setEnabled(true);
+    DriverStationSim.notifyNewData();
+    for (int i = 0; i < 50; i++) {
+      stepRobot();
+      assertEquals(
+          MotorIO.ControlMode.DISABLED,
+          Drum.mInstance.getControlMode(),
+          "re-enable must not spin the drum back up, loop " + i);
+      assertEquals(0.0, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS, "loop " + i);
+      assertEquals(0.0, feederSetpoint(), EPS, "no feeding without the button, loop " + i);
+    }
+
+    press(1, BUTTON_RB); // a fresh press must still shoot normally after the cycle
+    assertTrue(stepUntilFeeding(40), "fresh press still shoots after re-enable");
+    release(1, BUTTON_RB);
+  }
+
   @Test
   void portOneTakeoverInterruptsPortZeroShooting() {
     connect(0);
@@ -1235,7 +1281,10 @@ class TeleopIntegrationTest {
     connect(1); // takeover: port 0's held command must be interrupted by priority loss
     settle();
     assertEquals(0.0, feederSetpoint(), EPS, "takeover stopped port 0's volley");
-    assertEquals(DrumConstants.StowVelocity, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+    assertEquals(
+        MotorIO.ControlMode.DISABLED,
+        Drum.mInstance.getControlMode(),
+        "takeover left the drum stopped");
 
     // The panel cannot be pinned by the interrupted command: the FEEDING heartbeat must expire
     // (0.15 s) and a fresh publish must fire before "Idle" shows.
@@ -1608,10 +1657,9 @@ class TeleopIntegrationTest {
     release(0, BUTTON_RB); // X is STILL held: the interrupted Manual must not come back
     settle();
     assertEquals(
-        DrumConstants.StowVelocity,
-        Drum.mInstance.getVelocitySetpointRotPerSec(),
-        EPS,
-        "Shooting end() stowed the drum; interrupted Manual did not resume");
+        MotorIO.ControlMode.DISABLED,
+        Drum.mInstance.getControlMode(),
+        "Shooting end() stopped the drum; interrupted Manual did not resume");
     assertEquals(0.0, feederSetpoint(), EPS);
 
     release(0, BUTTON_X);
