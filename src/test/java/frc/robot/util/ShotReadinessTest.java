@@ -114,20 +114,29 @@ class ShotReadinessTest {
   }
 
   @Test
-  void hoodOffTargetRemainsATruthfulDiagnostic() {
+  void hoodOffTargetDoesNotGateTheFeedRule() {
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
     commandAndSettle();
 
-    // Far outside HOOD_ANGLE_TOLERANCE_ROT (0.02) from the settled position.
+    // Far outside HOOD_ANGLE_TOLERANCE_ROT (0.02) from the settled position: the hood diagnostic
+    // reports off-target, but the feed gate is drum-only, so raw/stable readiness are unaffected.
     double farTargetRot = Hood.mInstance.getPositionRot() + 0.5;
-    ShotReadiness.Evaluation eval =
-        new ShotReadiness().update(DrumConstants.MaxShotVelocity, farTargetRot);
+    ShotReadiness readiness = new ShotReadiness();
+    ShotReadiness.Evaluation eval = readiness.update(DrumConstants.MaxShotVelocity, farTargetRot);
     assertFalse(eval.flywheelZero());
-    assertTrue(eval.drumReady(), "flywheel ready, so the hood diagnostic surfaces");
+    assertTrue(eval.drumReady());
     assertFalse(eval.hoodReady(), "the measured angle must not be faked ready");
-    assertFalse(eval.rawReady(), "raw readiness remains a measurement diagnostic");
-    assertFalse(eval.stableReady());
-    assertEquals(ShotReadiness.REASON_HOOD_NOT_AT_ANGLE, eval.blockReason());
+    assertTrue(eval.rawReady(), "the hood never gates the feed rule");
+    assertFalse(eval.stableReady(), "debounce has not seen 0.15 s of readiness yet");
+    assertEquals(ShotReadiness.REASON_NONE, eval.blockReason(), "no gate condition is unmet");
+
+    for (int i = 0; i < 10; i++) {
+      step();
+      eval = readiness.update(DrumConstants.MaxShotVelocity, farTargetRot);
+      assertTrue(eval.rawReady(), "hood stays off-target the whole time");
+      assertFalse(eval.hoodReady());
+    }
+    assertTrue(eval.stableReady(), "stable window earned with the hood still off-target");
   }
 
   @Test

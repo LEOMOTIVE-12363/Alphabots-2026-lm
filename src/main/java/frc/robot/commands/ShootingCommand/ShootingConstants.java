@@ -11,11 +11,13 @@ public final class ShootingConstants {
   public static final LoggedTunableNumber FeederRotpsTunable =
       new LoggedTunableNumber("Shooting/FeederRotps", 80);
 
-  // Measurement-only readiness tolerances for diagnostics; they do not gate feeding.
+  // Flywheel-speed feed gate: the drum must sit within this tolerance of the limited target,
+  // held for READY_DEBOUNCE_SEC, before any ball is fed. The hood tolerance is a logged
+  // diagnostic only — the hood never gates feeding.
   public static final double SHOOTER_VELOCITY_TOLERANCE_ROTPS = 1.;
   public static final double HOOD_ANGLE_TOLERANCE_ROT = 0.02;
 
-  // Debounce window for the stableReady diagnostic only; it never delays or pauses feeding.
+  // Stable window the flywheel-speed gate requires before feeding starts or resumes.
   public static final double READY_DEBOUNCE_SEC = 0.15;
 
   // Indexer jam detection during SHOOT/RETRACT: stator current continuously above this threshold

@@ -2,6 +2,8 @@ package frc.robot.commands.ShootingCommand;
 
 import static frc.robot.util.DashboardControlsTestUtil.FLYWHEEL;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -30,7 +32,8 @@ import org.junit.jupiter.api.Test;
 /**
  * Measurement faults with the target left unchanged: the drum sags below its setpoint and the hood
  * drifts off its target. ShootingTest covers target-side edits and the 0% limit; these tests prove
- * that measured readiness faults remain observable without interrupting feeding or retract timing.
+ * that a measured drum fault pauses feeding on the very loop it appears (the flywheel-speed gate)
+ * while a measured hood fault never does, and that recovery auto-resumes the volley.
  *
  * <p>Injection semantics: the sim mechanism IO is instant-setpoint (the measured state snaps to the
  * setpoint every periodic), so an injected value only exists for the execute() it precedes and is
@@ -118,6 +121,12 @@ class ShootingMeasurementFaultTest {
     return f.get(s).toString();
   }
 
+  private static double retractElapsed(Shooting s) throws Exception {
+    Field f = Shooting.class.getDeclaredField("retractTimer");
+    f.setAccessible(true);
+    return ((Timer) f.get(s)).get();
+  }
+
   /**
    * Overwrites one field of a subsystem's logged inputs, mirroring what a real measurement fault
    * would look like at the only layer the control loop reads. Must run AFTER a periodic (which
@@ -150,7 +159,7 @@ class ShootingMeasurementFaultTest {
   }
 
   @Test
-  void measuredDrumSagDoesNotInterruptFeedOrRetractTimer() throws Exception {
+  void measuredDrumSagPausesSameLoopAndAutoResumes() throws Exception {
     assertNull(Drive.mInstance, "test must run with no drivetrain / pose source");
     Shooting s = new Shooting(false);
     s.initialize();
@@ -163,31 +172,28 @@ class ShootingMeasurementFaultTest {
             >= ShootingConstants.SHOOTER_VELOCITY_TOLERANCE_ROTPS,
         "the injected drum measurement is genuinely outside the readiness tolerance");
     step(s);
-    assertTrue(isFeeding(), "drum sag must not stop the feeder");
-    assertEquals(ShootingConstants.IndexerRotpsTunable.getAsDouble(), indexerSetpoint(), EPS);
+    assertEquals(0.0, feederSetpoint(), EPS, "drum sag stops the feeder on the detection loop");
+    assertEquals(0.0, indexerSetpoint(), EPS, "indexer stops too");
     assertEquals(
         targetBefore,
         Drum.mInstance.getVelocitySetpointRotPerSec(),
         EPS,
         "drum keeps being driven to the unchanged target");
+    assertEquals("PAUSED", stateOf(s));
 
+    // Sustained sag keeps the volley paused; the retract timer stays frozen for that stretch.
+    double retractAtPause = retractElapsed(s);
     for (int i = 0; i < 10; i++) {
       injectDrumVelocity(DRUM_SAG_ROTPS);
       step(s);
-      assertTrue(isFeeding(), "sustained sag must not pause the volley, loop " + i);
-      assertEquals(ShootingConstants.IndexerRotpsTunable.getAsDouble(), indexerSetpoint(), EPS);
+      assertEquals(0.0, feederSetpoint(), EPS, "sustained sag keeps the volley paused, loop " + i);
     }
-    assertEquals("RETRACT", stateOf(s), "sag must not freeze the retract timer");
-    injectDrumVelocity(DRUM_SAG_ROTPS);
-    step(s);
-    assertEquals(
-        ShootingConstants.INTAKE_RETRACT_POSITION_CM.getAsDouble(),
-        IntakeDeploy.mInstance.getPositionSetpointRot(),
-        EPS,
-        "retract outputs continue during the measured fault");
+    assertEquals(retractAtPause, retractElapsed(s), EPS, "pause time never counts toward retract");
 
-    step(s);
-    assertTrue(isFeeding(), "feed also continues on the first loop without injection");
+    // Recovery: the first loop without injection re-reads the on-target sim value and the volley
+    // auto-resumes once the full stable window is re-earned.
+    assertTrue(stepUntilFeeding(s, 15), "auto-resumed after the measurement recovered");
+    assertTrue(retractElapsed(s) > retractAtPause, "feeding time counts toward retract again");
     s.end(true);
   }
 
@@ -248,7 +254,7 @@ class ShootingMeasurementFaultTest {
   }
 
   @Test
-  void measuredDrumSagDoesNotWithdrawCurrentFeed() throws Exception {
+  void measuredDrumSagWithdrawsCurrentFeedUntilRecovery() throws Exception {
     Shooting s = new Shooting(true);
     s.initialize();
     assertTrue(stepUntilCurrentFeeding(s, 30), "energy-save mode feeding at 50 A");
@@ -261,27 +267,36 @@ class ShootingMeasurementFaultTest {
             >= ShootingConstants.SHOOTER_VELOCITY_TOLERANCE_ROTPS,
         "the injected current-mode drum fault is outside the readiness tolerance");
     step(s);
-    assertTrue(isCurrentFeeding(), "drum sag must not withdraw the feeder 50 A request");
-    assertEquals(MotorIO.ControlMode.CURRENT, Indexer.mInstance.getControlMode());
-    assertEquals(50.0, Indexer.mInstance.getCurrentSetpointAmps(), EPS);
+    assertNotEquals(
+        MotorIO.ControlMode.CURRENT,
+        Feeder.mInstance.getControlMode(),
+        "drum sag withdraws the feeder 50 A request on the detection loop");
+    assertEquals(0.0, Feeder.mInstance.getCurrentSetpointAmps(), EPS, "no current request left");
+    assertNotEquals(MotorIO.ControlMode.CURRENT, Indexer.mInstance.getControlMode());
+    assertEquals(0.0, Indexer.mInstance.getCurrentSetpointAmps(), EPS);
     assertEquals(targetBefore, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
 
     for (int i = 0; i < 10; i++) {
       injectDrumVelocity(DRUM_SAG_ROTPS);
       step(s);
-      assertTrue(isCurrentFeeding(), "sustained sag keeps current feed active, loop " + i);
-      assertEquals(MotorIO.ControlMode.CURRENT, Indexer.mInstance.getControlMode());
-      assertEquals(50.0, Indexer.mInstance.getCurrentSetpointAmps(), EPS);
+      assertFalse(
+          isCurrentFeeding(), "sustained sag keeps the current request withdrawn, loop " + i);
     }
-    step(s);
-    assertTrue(isCurrentFeeding(), "current feed continues after the measurement recovers");
+
+    // Recovery restores the 50 A request once the stable window is re-earned.
+    boolean resumed = false;
+    for (int i = 0; i < 15 && !resumed; i++) {
+      step(s);
+      resumed = isCurrentFeeding();
+    }
+    assertTrue(resumed, "current feed restored after the measurement recovered");
     s.end(true);
   }
 
   @Test
   void pauseDuringRetractResumesIntoRetractAndKeepsIntakeRetracted() throws Exception {
     // A 0% limit pauses from RETRACT too: the pause keeps pulling the intake in, and a positive
-    // limit returns directly to RETRACT on that loop rather than waiting for a stable window.
+    // limit returns to RETRACT once the spin-up and stable window complete.
     Shooting s = new Shooting(false);
     s.initialize();
     assertTrue(stepUntilFeeding(s, 30), "reached SHOOT");
@@ -312,8 +327,19 @@ class ShootingMeasurementFaultTest {
     }
 
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
-    step(s);
-    assertTrue(isFeeding(), "resumed feeding on the positive-limit loop");
+    boolean resumed = false;
+    for (int i = 0; i < 15 && !resumed; i++) {
+      step(s);
+      resumed = isFeeding();
+      if (!resumed) {
+        assertEquals(
+            retractCm,
+            IntakeDeploy.mInstance.getPositionSetpointRot(),
+            EPS,
+            "still-paused RETRACT keeps the intake retracted, recovery loop " + i);
+      }
+    }
+    assertTrue(resumed, "resumed feeding after the recovery window");
     assertEquals("RETRACT", stateOf(s), "resume returns to the remembered RETRACT, not SHOOT");
     s.end(true);
   }
