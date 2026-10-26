@@ -19,27 +19,34 @@ import frc.robot.util.ShotReadiness;
 import org.littletonrobotics.junction.Logger;
 
 /**
- * Demo shooting: drives the drum and hood from the Elastic Flywheel Speed Limit (%) and Hood Angle
- * (%) entries and feeds immediately whenever the flywheel limit is positive. No aiming, vision, or
- * pose/distance input is used; the drivetrain is not required.
+ * Demo shooting: spins the drum and sets the hood from the Elastic Flywheel Speed Limit (%) and
+ * Hood Angle (%) entries, then feeds only once the flywheel is actually at speed. No aiming,
+ * vision, or pose/distance input is used; the drivetrain is not required.
  *
- * <p>The shared {@link ShotReadiness} rule is evaluated every loop only for genuine readiness
- * diagnostics. Measured drum speed, hood position, and the stable-ready debounce never permit or
- * inhibit feeding. Only a 0% flywheel limit pauses the feed path: feeder, indexer, and intake
- * roller stop on that loop while the drum and hood keep their targets. Any positive limit restores
- * feeding on that same loop. A 0% pause freezes the retract timer mid-count.
+ * <p>The flywheel-speed gate runs continuously through the whole volley, not just during SPIN_UP,
+ * via the shared {@link ShotReadiness} rule: drum within {@link
+ * ShootingConstants#SHOOTER_VELOCITY_TOLERANCE_ROTPS} of the limited target, held for the {@link
+ * ShootingConstants#READY_DEBOUNCE_SEC} stable window. The hood never gates feeding — it stays a
+ * logged diagnostic — so an unreachable hood target cannot hold a hopper full of balls in the
+ * indexer. Losing speed mid-volley pauses feeding on that very loop (the feed-path motors stop
+ * immediately while the drum and hood keep being driven to target), and regaining stable readiness
+ * auto-resumes the volley exactly where it left off, without the driver releasing the button. A
+ * pause freezes the retract timer mid-count, so paused time never counts toward the retract delay.
  *
- * <p>UNJAM always runs its back-off to completion, including at a 0% flywheel limit. Jam
- * confirmation accumulates only while feeding; PAUSED and UNJAM keep feeding the jam debouncer
- * clear samples so non-feeding time cannot pre-fill its window. The retract timer freezes when
- * UNJAM starts. When the back-off completes, a positive limit immediately restores the remembered
- * SHOOT or RETRACT outputs; a 0% limit enters PAUSED instead.
+ * <p>UNJAM always runs its back-off to completion regardless of readiness — clearing a jam is never
+ * suppressed by the not-ready gate — then routes through PAUSED instead of resuming directly, so
+ * forward feeding restarts only once the flywheel is stable-ready again (it may have sagged while
+ * stalled; the readiness debounce is reset at jam entry, so the post-unjam volley re-earns a full
+ * stable window). The jam confirmation window only accumulates while feeding: every non-feeding
+ * state (SPIN_UP, PAUSED, UNJAM) keeps feeding the jam debouncer clear samples, so time spent
+ * spinning up, paused, or backing out a jam never pre-fills the window.
  *
  * <p>Releasing the key still ends the command outright: nothing auto-resumes after end(), and the
- * whileTrue binding re-initializes the command on the next press.
+ * whileTrue binding re-initializes the command (and the readiness debounce) on the next press.
  */
 public class Shooting extends Command {
   private enum States {
+    SPIN_UP,
     SHOOT,
     RETRACT,
     PAUSED,
@@ -48,23 +55,25 @@ public class Shooting extends Command {
 
   private States state;
 
-  // Times the delay between starting to feed and retracting the intake. Only 0% pauses and UNJAM
-  // freeze this timer; measured readiness faults and target edits do not.
+  // Times the delay between starting to feed and retracting the intake. SPIN_UP and PAUSED never
+  // run it; 0% pauses and UNJAM freeze it mid-count and only feeding loops start or resume it.
   private final Timer retractTimer = new Timer();
   private boolean retractTimerStarted;
   private final boolean isEnergySave;
 
   // Indexer jam detection: stator current must stay above the threshold for the full debounce
-  // time before UNJAM triggers. Only feeding loops count; PAUSED and UNJAM feed clear samples.
+  // time before UNJAM triggers. Only feeding loops count; SPIN_UP, PAUSED, and UNJAM feed clear
+  // samples.
   private Debouncer jamDebouncer;
   // Times the fixed backwards-run of the indexer in UNJAM.
   private final Timer unjamTimer = new Timer();
   // The feeding state (SHOOT or RETRACT) to resume once the unjam back-off finishes.
   private States stateAfterUnjam = States.SHOOT;
-  // The feeding state (SHOOT or RETRACT) to resume once the flywheel limit becomes positive.
+  // The feeding state (SHOOT or RETRACT) PAUSED returns to once the shot is stable-ready again.
   private States stateAfterPause;
 
-  // Real readiness measurements for the Shooting/*Ready log keys. These never gate feed outputs.
+  // Shared readiness rule (the flywheel-speed gate plus the hood diagnostic), with this command's
+  // own debounce state; lastEvaluation backs the Shooting/*Ready log keys and the panel decision.
   private final ShotReadiness readiness = new ShotReadiness();
   private ShotReadiness.Evaluation lastEvaluation;
 
@@ -81,7 +90,7 @@ public class Shooting extends Command {
 
   @Override
   public void initialize() {
-    state = States.SHOOT;
+    state = States.SPIN_UP;
     retractTimerStarted = false;
     retractTimer.stop();
     retractTimer.reset();
@@ -107,7 +116,12 @@ public class Shooting extends Command {
     Logger.recordOutput("Shooting/hoodSetpointDeg", DashboardControls.getHoodTargetDeg());
   }
 
-  /** Update real readiness diagnostics once per execute; the result never gates feeding. */
+  /**
+   * One readiness evaluation for this loop against the dashboard shot configuration, logging the
+   * readiness keys the operator panel consumes. Every state except UNJAM calls this exactly once
+   * per loop; UNJAM deliberately holds not-ready samples instead — a jam back-off must never be
+   * suppressed by the not-ready gate, and its quiet time must not let the stable debounce free-run.
+   */
   private ShotReadiness.Evaluation updateReadiness() {
     lastEvaluation = readiness.update(DrumConstants.MaxShotVelocity, hoodTargetRot());
     Logger.recordOutput("Shooting/drumReady", lastEvaluation.drumReady());
@@ -126,9 +140,10 @@ public class Shooting extends Command {
   /**
    * Feed the jam debouncer a clear sample without reading the mechanism. A kRising debouncer
    * re-anchors its timer only on baseline (clear) samples and lets it free-run otherwise, so every
-   * non-feeding state must call this each loop: otherwise pause or back-off time would count toward
-   * the confirmation window, and the first high-current sample after feeding resumed would trip
-   * UNJAM instantly instead of having to persist for the full debounce.
+   * non-feeding state must call this each loop: otherwise time spent spinning up, paused, or
+   * backing out a jam would silently count toward the confirmation window, and the first
+   * high-current sample after feeding resumed would trip UNJAM instantly instead of having to
+   * persist for the full debounce.
    */
   private void holdJamNotDetected() {
     jamDebouncer.calculate(false);
@@ -143,6 +158,28 @@ public class Shooting extends Command {
     return jammed;
   }
 
+  /**
+   * SHOOT/RETRACT -> UNJAM when the indexer stalls. Returns true when the transition fired;
+   * remembers the interrupted state so the volley resumes exactly where it left off (through
+   * PAUSED, see unjam()). The retract timer freezes the moment the back-off starts and the
+   * readiness debounce resets, so after the back-off the shot must re-earn a fresh stable-ready
+   * window before feeding resumes.
+   */
+  private boolean checkJamAndStartUnjam(States resumeState) {
+    if (!isIndexerJammed()) {
+      return false;
+    }
+    stateAfterUnjam = resumeState;
+    if (retractTimerStarted) {
+      retractTimer.stop();
+    }
+    readiness.reset();
+    state = States.UNJAM;
+    unjamTimer.restart();
+    writeUnjamOutputs();
+    return true;
+  }
+
   /** Reverse only the feeder/indexer while holding the shooter targets during UNJAM. */
   private void writeUnjamOutputs() {
     prepareShooter();
@@ -153,24 +190,10 @@ public class Shooting extends Command {
   }
 
   /**
-   * SHOOT/RETRACT -> UNJAM when the indexer stalls. The reverse outputs and retract freeze start on
-   * the detection loop, and the interrupted feeding state is remembered for immediate recovery.
+   * Back the stalled fuel out of the indexer, then re-gate through PAUSED: forward feeding resumes
+   * only once the flywheel is stable-ready again. The back-off runs to completion regardless of
+   * readiness — clearing a jam must never be suppressed by the not-ready gate.
    */
-  private boolean checkJamAndStartUnjam(States resumeState) {
-    if (!isIndexerJammed()) {
-      return false;
-    }
-    stateAfterUnjam = resumeState;
-    if (retractTimerStarted) {
-      retractTimer.stop();
-    }
-    state = States.UNJAM;
-    unjamTimer.restart();
-    writeUnjamOutputs();
-    return true;
-  }
-
-  /** Run the fixed back-off, then immediately resume feeding if the flywheel limit is positive. */
   private void unjam() {
     // Back-off time must not pre-fill the next jam confirmation window.
     holdJamNotDetected();
@@ -179,21 +202,8 @@ public class Shooting extends Command {
       return;
     }
 
-    if (lastEvaluation.flywheelZero()) {
-      enterPause(stateAfterUnjam);
-      holdPauseOutputs();
-      return;
-    }
-
-    state = stateAfterUnjam;
-    if (state == States.RETRACT) {
-      retract();
-    } else {
-      shoot();
-    }
-    // Feeding resumes now, but the completion execute remains in UNJAM's frozen retract interval.
-    // startOrResumeRetractTimer() picks the accumulated count back up on the next feeding loop.
-    retractTimer.stop();
+    enterPause(stateAfterUnjam);
+    holdPauseOutputs();
   }
 
   /** Drive the full feed path (intake roller, indexer, feeder) at the tuned shooting speeds. */
@@ -227,7 +237,10 @@ public class Shooting extends Command {
     if (checkJamAndStartUnjam(States.SHOOT)) {
       return;
     }
-    if (lastEvaluation.flywheelZero()) {
+    // Losing flywheel speed mid-volley pauses feeding on this very loop — the feed path stops now,
+    // not next loop (a 0% limit also reads not-ready); PAUSED auto-resumes the volley once the
+    // shot is stable-ready again.
+    if (!lastEvaluation.rawReady()) {
       enterPause(States.SHOOT);
       holdPauseOutputs();
       holdJamNotDetected();
@@ -246,7 +259,7 @@ public class Shooting extends Command {
     if (checkJamAndStartUnjam(States.RETRACT)) {
       return;
     }
-    if (lastEvaluation.flywheelZero()) {
+    if (!lastEvaluation.rawReady()) {
       enterPause(States.RETRACT);
       holdPauseOutputs();
       holdJamNotDetected();
@@ -260,7 +273,11 @@ public class Shooting extends Command {
         ShootingConstants.INTAKE_RETRACT_POSITION_CM.getAsDouble(), 80, 1000, 0);
   }
 
-  /** Remember the feeding state and freeze retract timing for a 0% flywheel pause. */
+  /**
+   * Freeze the volley exactly where it is: remember the feeding state to resume and freeze the
+   * retract timer mid-count (Timer.start() on resume picks the accumulated count back up, so paused
+   * time never counts toward the retract delay).
+   */
   private void enterPause(States resume) {
     stateAfterPause = resume;
     if (retractTimerStarted) {
@@ -269,7 +286,7 @@ public class Shooting extends Command {
     state = States.PAUSED;
   }
 
-  /** Stop only the feed path at 0%; the drum/hood and any active retract keep their targets. */
+  /** Stop only the feed path; the drum/hood and any active retract keep their targets. */
   private void holdPauseOutputs() {
     prepareShooter();
     IntakeRoller.mInstance.setV(0);
@@ -281,9 +298,9 @@ public class Shooting extends Command {
     }
   }
 
-  /** Hold at 0%, or restore the remembered feeding outputs on the first positive-limit loop. */
+  /** Hold at 0% or while the flywheel is below speed, then resume the remembered feeding state. */
   private void paused() {
-    if (lastEvaluation.flywheelZero()) {
+    if (!lastEvaluation.stableReady()) {
       holdPauseOutputs();
       holdJamNotDetected();
       return;
@@ -297,31 +314,70 @@ public class Shooting extends Command {
     }
   }
 
+  /** Hold the shooter on target with the feed path stopped until the flywheel is stable-ready. */
+  private void spinUp() {
+    prepareShooter();
+    IntakeRoller.mInstance.setV(0);
+    Indexer.mInstance.setV(0);
+    Feeder.mInstance.setV(0);
+    // Spin-up is not feeding: keep the jam debouncer anchored, or a long real spin-up would
+    // pre-fill the confirmation window and the first high-current sample would trip UNJAM.
+    holdJamNotDetected();
+
+    if (lastEvaluation.stableReady()) {
+      state = States.SHOOT;
+    }
+  }
+
+  /** The blocked reason for a non-feeding, non-unjam loop. */
+  private String pausedReason() {
+    if (lastEvaluation.flywheelZero()) {
+      return ShotReadiness.REASON_FLYWHEEL_ZERO;
+    }
+    return lastEvaluation.drumReady()
+        ? ShotReadiness.REASON_STABILIZING // at speed but inside the debounce window
+        : ShotReadiness.REASON_DRUM_NOT_AT_SPEED;
+  }
+
+  private OperatorStatus.Action pausedAction() {
+    return lastEvaluation.flywheelZero()
+        ? OperatorStatus.Action.WAITING_RECOVERY
+        : OperatorStatus.Action.SPINNING_UP;
+  }
+
   @Override
   public void execute() {
-    updateReadiness();
+    // UNJAM never evaluates readiness: the back-off must not be suppressed by the not-ready gate,
+    // and its quiet time must not let the stable debounce free-run.
+    if (state == States.UNJAM) {
+      readiness.holdNotReady();
+    } else {
+      updateReadiness();
+    }
     switch (state) {
+      case SPIN_UP -> spinUp();
       case SHOOT -> shoot();
       case RETRACT -> retract();
       case PAUSED -> paused();
       case UNJAM -> unjam();
     }
-    // PAUSED reports no ball flow; UNJAM is a local feeder/indexer reverse, never a full-path one.
+    // SPIN_UP and PAUSED report no ball flow; UNJAM is a local feeder/indexer reverse.
     switch (state) {
       case SHOOT, RETRACT -> BallFlowTracker.report(BallFlowTracker.FlowKind.FEED);
       case UNJAM -> BallFlowTracker.report(BallFlowTracker.FlowKind.LOCAL_REVERSE);
-      case PAUSED -> {}
+      case SPIN_UP, PAUSED -> {}
     }
     // Report the action produced by this execute, including immediate pause/recovery transitions.
     switch (state) {
       case SHOOT, RETRACT -> OperatorStatus.report(OperatorStatus.Action.FEEDING);
-      case PAUSED -> OperatorStatus.report(OperatorStatus.Action.WAITING_RECOVERY);
+      case SPIN_UP -> OperatorStatus.report(OperatorStatus.Action.SPINNING_UP);
+      case PAUSED -> OperatorStatus.report(pausedAction());
       case UNJAM -> OperatorStatus.report(OperatorStatus.Action.CLEARING_JAM);
     }
-    // The panel decision follows the actual outputs, never the measured readiness diagnostics.
+    // The panel decision follows the actual outputs, never the hood diagnostic.
     switch (state) {
       case SHOOT, RETRACT -> OperatorStatus.reportFeedDecision(true, ShotReadiness.REASON_NONE);
-      case PAUSED -> OperatorStatus.reportFeedDecision(false, ShotReadiness.REASON_FLYWHEEL_ZERO);
+      case SPIN_UP, PAUSED -> OperatorStatus.reportFeedDecision(false, pausedReason());
       case UNJAM -> OperatorStatus.reportFeedDecision(false, ShotReadiness.REASON_CLEARING_JAM);
     }
     Logger.recordOutput("Shooting/state", state.toString());

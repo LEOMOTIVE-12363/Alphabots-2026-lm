@@ -2,6 +2,8 @@ package frc.robot.commands.ManualCommand;
 
 import static frc.robot.util.DashboardControlsTestUtil.FLYWHEEL;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
@@ -134,7 +136,7 @@ class ManualTest {
   }
 
   @Test
-  void feedsOnFirstExecuteBeforeDrumAndHoodAreReady() {
+  void waitsForStableSpeedBeforeFeeding() {
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
     Drum.mInstance.setVelocityRotPerSec(0.0);
     Hood.mInstance.setPositionRot(0.25);
@@ -142,9 +144,11 @@ class ManualTest {
 
     Manual manual = new Manual();
     manual.initialize();
+    // First execute drives the Manual targets but must not feed: the drum is still at 0 against
+    // its 50 rot/s target, and the hood being off-target must not matter (it never gates).
     step(manual);
-
-    assertManualFeedPath();
+    assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS);
+    assertEquals(0.0, Indexer.mInstance.getVelocitySetpointRotPerSec(), EPS);
     assertEquals(
         ManualConstants.ShooterRotpsTunable.getAsDouble(),
         Drum.mInstance.getVelocitySetpointRotPerSec(),
@@ -153,11 +157,14 @@ class ManualTest {
         ManualConstants.HoodDegTunable.getAsDouble() / 360.0,
         Hood.mInstance.getPositionSetpointRot(),
         EPS);
+
+    stepUntilFeeding(manual, 30);
+    assertManualFeedPath();
     manual.end(true);
   }
 
   @Test
-  void zeroFlywheelStopsFeedAndPositiveLimitResumesImmediately() {
+  void zeroFlywheelStopsFeedAndPositiveLimitResumesAfterWindow() {
     Manual manual = new Manual();
     manual.initialize();
     stepUntilFeeding(manual, 50);
@@ -175,24 +182,43 @@ class ManualTest {
     assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS);
 
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
-    step(manual);
+    // The drum must spin back up and re-earn the stable window before feeding resumes.
+    for (int i = 0; i < 5; i++) {
+      step(manual);
+      assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS, "recovery loop " + i);
+    }
+    stepUntilFeeding(manual, 25);
     assertManualFeedPath();
     manual.end(true);
   }
 
   @Test
-  void measuredDrumSagDoesNotPauseFeeding() throws Exception {
+  void measuredDrumSagPausesSameLoopAndAutoResumes() throws Exception {
     Manual manual = new Manual();
     manual.initialize();
     stepUntilFeeding(manual, 50);
     double drumTarget = Drum.mInstance.getVelocitySetpointRotPerSec();
 
-    for (int i = 0; i < 3; i++) {
+    injectDrumVelocity(0.0);
+    step(manual);
+    assertEquals(
+        0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS, "sag stops the feed same-loop");
+    assertEquals(0.0, Indexer.mInstance.getVelocitySetpointRotPerSec(), EPS);
+    assertEquals(drumTarget, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+
+    for (int i = 0; i < 5; i++) {
       injectDrumVelocity(0.0);
       step(manual);
-      assertManualFeedPath();
-      assertEquals(drumTarget, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+      assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS, "sag loop " + i);
     }
+
+    // Recovery (no injection re-reads the on-target sim value) auto-resumes after the window.
+    for (int i = 0; i < 5; i++) {
+      step(manual);
+      assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS, "window loop " + i);
+    }
+    stepUntilFeeding(manual, 15);
+    assertManualFeedPath();
     manual.end(true);
   }
 
@@ -213,14 +239,22 @@ class ManualTest {
   }
 
   @Test
-  void drumTargetChangeDoesNotPauseFeeding() {
+  void drumTargetChangePausesBrieflyThenResumes() {
     Manual manual = new Manual();
     manual.initialize();
     stepUntilFeeding(manual, 50);
 
+    // New drum target 25 rot/s vs the still-measured 50: the edit loop pauses, and the feed
+    // resumes at the new target once the stable window is re-earned.
     DashboardControlsTestUtil.set(FLYWHEEL, 50.0);
     step(manual);
+    assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS);
+    assertEquals(
+        0.5 * ManualConstants.ShooterRotpsTunable.getAsDouble(),
+        Drum.mInstance.getVelocitySetpointRotPerSec(),
+        EPS);
 
+    stepUntilFeeding(manual, 25);
     assertManualFeedPath();
     assertEquals(
         0.5 * ManualConstants.ShooterRotpsTunable.getAsDouble(),
@@ -244,7 +278,7 @@ class ManualTest {
   }
 
   @Test
-  void operatorPanelMatchesImmediateManualDecision() {
+  void operatorPanelMatchesGatedManualDecision() {
     OperatorStatus.resetForTest();
     OperatorStatus.setClockForTest(Timer::getFPGATimestamp);
     DriverStationSim.setDsAttached(true);
@@ -258,6 +292,11 @@ class ManualTest {
     manual.initialize();
     step(manual);
 
+    assertEquals(Action.SPINNING_UP, OperatorStatus.currentAction());
+    assertFalse(OperatorStatus.feedAllowed());
+    assertNotEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());
+
+    stepUntilFeeding(manual, 30);
     assertEquals(Action.FEEDING, OperatorStatus.currentAction());
     assertTrue(OperatorStatus.feedAllowed());
     assertEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());

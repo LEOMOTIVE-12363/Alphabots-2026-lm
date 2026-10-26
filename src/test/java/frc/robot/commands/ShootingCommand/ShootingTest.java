@@ -39,9 +39,11 @@ import org.littletonrobotics.junction.networktables.LoggedNetworkNumber;
  * Runs Shooting against the sim mechanism IO with no Drive, pose, or vision ever created: if the
  * command touched any of them it would throw on the null Drive.mInstance.
  *
- * <p>The instant-setpoint sim snaps Drum/Hood to their setpoints on the next periodic, so a
- * dashboard edit leaves exactly one loop where the new target and old measurement disagree. Feeding
- * must continue through that mismatch; only a 0% flywheel limit pauses the feed path.
+ * <p>The instant-setpoint sim snaps Drum/Hood to their setpoints on the next periodic, so after a
+ * press or a dashboard edit the flywheel reaches its new target within a loop or two. Feeding is
+ * gated on that measured speed plus the 0.15 s stable window: a press from a stopped drum feeds
+ * only after spin-up, and a mid-volley edit or sag pauses the feed path on the detection loop and
+ * auto-resumes once the shot re-earns the stable window. The hood never gates feeding.
  */
 class ShootingTest {
   private static final double EPS = 1e-6;
@@ -129,7 +131,7 @@ class ShootingTest {
   }
 
   @Test
-  void velocityModeFeedsOnFirstExecuteWithoutPoseOrVision() {
+  void velocityModeWaitsForFlywheelSpeedThenFeeds() {
     assertNull(Drive.mInstance, "test must run with no drivetrain / pose source");
     DashboardControlsTestUtil.set(FLYWHEEL, 50.0);
     DashboardControlsTestUtil.set(HOOD, 100.0);
@@ -142,22 +144,26 @@ class ShootingTest {
     Indexer.mInstance.periodic();
     Feeder.mInstance.periodic();
     assertEquals(0.0, Drum.mInstance.getVelocityRotPerSec(), EPS, "drum starts stopped");
-    assertEquals(0.0, Hood.mInstance.getPositionRot(), EPS, "hood starts off its 100% target");
 
     Shooting shooting = new Shooting(false);
     assertFalse(shooting.getRequirements().contains(Drive.mInstance));
     shooting.initialize();
     step(shooting);
 
-    assertEquals(feedSpeed(), feederSetpoint(), EPS, "feeder runs on the first execute");
+    // The very first execute drives the shooter targets but must not feed: the drum is still at 0
+    // against its 33.5 rot/s target, so a hopper-fed ball would jam against a slow flywheel.
+    assertEquals(0.0, feederSetpoint(), EPS, "no feed on the first execute from a stopped drum");
+    assertEquals(0.0, indexerSetpoint(), EPS);
     assertEquals(
-        ShootingConstants.IndexerRotpsTunable.getAsDouble(),
-        indexerSetpoint(),
+        0.5 * DrumConstants.MaxShotVelocity,
+        Drum.mInstance.getVelocitySetpointRotPerSec(),
         EPS,
-        "indexer runs on the first execute");
-    assertEquals(
-        0.5 * DrumConstants.MaxShotVelocity, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+        "drum commanded from the first execute");
     assertEquals(HoodConstants.MaxAngleDeg / 360.0, Hood.mInstance.getPositionSetpointRot(), EPS);
+
+    assertTrue(stepUntilFeeding(shooting, 30), "feeds once the flywheel is at speed and stable");
+    assertEquals(feedSpeed(), feederSetpoint(), EPS);
+    assertEquals(ShootingConstants.IndexerRotpsTunable.getAsDouble(), indexerSetpoint(), EPS);
     shooting.end(true);
   }
 
@@ -178,12 +184,19 @@ class ShootingTest {
   }
 
   @Test
-  void startupFeedsWithoutWaitingForReadinessDebounce() {
+  void startupWaitsForStableSpeedWindow() {
+    // Defaults are ready from boot (flywheel 100%, drum snapped to target after the first loop),
+    // but feeding still waits for the full 0.15 s stable window before the first ball moves.
     Shooting shooting = new Shooting(false);
     shooting.initialize();
-    step(shooting);
-
-    assertTrue(isFeeding(), "the first execute feeds without a 0.15 s stable window");
+    for (int i = 0; i < 3; i++) {
+      step(shooting);
+      assertEquals(0.0, feederSetpoint(), EPS, "still spinning up at loop " + i);
+    }
+    for (int i = 3; i < 12; i++) {
+      step(shooting);
+    }
+    assertEquals(feedSpeed(), feederSetpoint(), EPS, "feeding once stable-ready");
     assertEquals(ShootingConstants.IndexerRotpsTunable.getAsDouble(), indexerSetpoint(), EPS);
     shooting.end(true);
   }
@@ -209,8 +222,10 @@ class ShootingTest {
     }
 
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
-    step(shooting);
-    assertTrue(isFeeding(), "positive limit resumes on that loop, without re-initialization");
+    assertTrue(
+        stepUntilFeeding(shooting, 15),
+        "auto-resumed within the spin-up and debounce window, no end/initialize in between");
+    assertTrue(isFeeding());
     assertEquals(ShootingConstants.IndexerRotpsTunable.getAsDouble(), indexerSetpoint(), EPS);
     shooting.end(true);
   }
@@ -229,8 +244,7 @@ class ShootingTest {
       step(shooting);
     }
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
-    step(shooting);
-    assertTrue(isFeeding(), "resumed feeding on the positive-limit loop");
+    assertTrue(stepUntilFeeding(shooting, 15), "resumed feeding after the recovery window");
 
     double retractCm = ShootingConstants.INTAKE_RETRACT_POSITION_CM.getAsDouble();
     for (int i = 0; i < 3; i++) {
@@ -273,29 +287,37 @@ class ShootingTest {
   }
 
   @Test
-  void midVolleyTargetChangeDoesNotInterruptFeedingOrRetractTiming() throws Exception {
+  void midVolleyTargetChangePausesBriefly() throws Exception {
     Shooting shooting = new Shooting(false);
     shooting.initialize();
     assertTrue(stepUntilFeeding(shooting, 30), "reached SHOOT at 100%");
 
     double retractElapsedBeforeEdit = retractElapsed(shooting);
+    // New drum target 33.5 rot/s vs the still-measured 67: not ready until the sim snaps, and the
+    // pause freezes the retract timer for that stretch.
     DashboardControlsTestUtil.set(FLYWHEEL, 50.0);
     step(shooting);
-    assertTrue(isFeeding(), "the target edit does not pause on its stale-measurement loop");
-    assertEquals(ShootingConstants.IndexerRotpsTunable.getAsDouble(), indexerSetpoint(), EPS);
-    assertTrue(
-        retractElapsed(shooting) > retractElapsedBeforeEdit,
-        "a target edit must not freeze the retract timer");
+    assertEquals(0.0, feederSetpoint(), EPS, "feeding paused on the detection loop");
+    assertEquals(
+        retractElapsedBeforeEdit,
+        retractElapsed(shooting),
+        EPS,
+        "the pause freezes the retract timer");
     assertEquals(
         0.5 * DrumConstants.MaxShotVelocity,
         Drum.mInstance.getVelocitySetpointRotPerSec(),
         EPS,
-        "drum now commanded at 50%");
+        "the pause loop already drives the drum to the new target");
+
+    assertTrue(stepUntilFeeding(shooting, 15), "auto-resumed at the new target");
+    assertTrue(
+        retractElapsed(shooting) > retractElapsedBeforeEdit,
+        "feeding time after the resume counts toward the retract delay again");
     shooting.end(true);
   }
 
   @Test
-  void unjamResumesImmediatelyWithoutReadinessGate() throws Exception {
+  void unjamRoutesThroughReadinessGateBeforeResuming() throws Exception {
     Shooting shooting = new Shooting(false);
     shooting.initialize();
     assertTrue(stepUntilFeeding(shooting, 30), "reached SHOOT");
@@ -323,11 +345,16 @@ class ShootingTest {
     assertNotEquals("UNJAM", stateOf(shooting), "back-off ran to completion");
 
     // Change both targets after the back-off so the next execute sees stale, off-target
-    // measurements. It must nevertheless feed on that first post-UNJAM loop, with no stable window.
+    // measurements. The readiness gate runs before any forward feed — the first post-unjam loop
+    // must stay stopped even at a positive limit, and the volley resumes only after the drum
+    // reaches the new target and re-earns the full stable window.
     DashboardControlsTestUtil.set(FLYWHEEL, 50.0);
     DashboardControlsTestUtil.set(HOOD, 100.0);
     step(shooting);
-    assertTrue(isFeeding(), "forward feed resumes on the first loop after UNJAM");
+    assertEquals(0.0, feederSetpoint(), EPS, "not feeding on the first loop after unjam");
+    assertEquals("PAUSED", stateOf(shooting));
+
+    assertTrue(stepUntilFeeding(shooting, 15), "forward feed resumes after re-earning the window");
     assertEquals(ShootingConstants.IndexerRotpsTunable.getAsDouble(), indexerSetpoint(), EPS);
     assertEquals(
         0.5 * DrumConstants.MaxShotVelocity, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
@@ -366,8 +393,8 @@ class ShootingTest {
     }
 
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
-    step(shooting);
-    assertTrue(isFeeding(), "positive limit restores feed immediately after a 0% hold");
+    assertTrue(
+        stepUntilFeeding(shooting, 15), "feeding resumed once stable-ready after the 0% hold");
     shooting.end(true);
   }
 
@@ -456,7 +483,7 @@ class ShootingTest {
   }
 
   @Test
-  void acceptanceUnjamDoesNotRequireFreshStableWindow() throws Exception {
+  void acceptanceUnjamRequiresFreshStableWindow() throws Exception {
     Shooting s = new Shooting(false);
     s.initialize();
     assertTrue(stepUntilFeeding(s, 30));
@@ -465,10 +492,9 @@ class ShootingTest {
     assertEquals("UNJAM", stateOf(s));
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(null);
     for (int i = 0; i < 40 && stateOf(s).equals("UNJAM"); i++) step(s);
-    assertNotEquals("UNJAM", stateOf(s));
+    assertEquals("PAUSED", stateOf(s));
     step(s);
-    assertTrue(isFeeding(), "one post-unjam execute must restore forward feed");
-    assertEquals(ShootingConstants.IndexerRotpsTunable.getAsDouble(), indexerSetpoint(), EPS);
+    assertEquals("PAUSED", stateOf(s), "one sample cannot prove stable recovery after unjam");
     s.end(true);
   }
 
@@ -496,7 +522,7 @@ class ShootingTest {
   }
 
   @Test
-  void acceptancePanelAllowsImmediateFeedingBeforeStableReady() {
+  void acceptancePanelWaitsForStableSpeed() {
     OperatorStatus.resetForTest();
     OperatorStatus.setClockForTest(Timer::getFPGATimestamp);
     DriverStationSim.setDsAttached(true);
@@ -505,16 +531,17 @@ class ShootingTest {
     Shooting s = new Shooting(false);
     s.initialize();
     stepWithPanel(s);
-
-    assertTrue(isFeeding(), "feeding starts without a startup debounce");
-    assertEquals(Action.FEEDING, OperatorStatus.currentAction());
-    assertTrue(OperatorStatus.feedAllowed(), "panel matches the actual first-loop feed decision");
-    assertEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());
+    stepWithPanel(s);
+    stepWithPanel(s);
+    assertEquals(0.0, feederSetpoint(), EPS, "still inside the startup speed window");
+    assertEquals(Action.SPINNING_UP, OperatorStatus.currentAction());
+    assertFalse(OperatorStatus.feedAllowed(), "not yet permitted to feed");
+    assertNotEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());
     s.end(true);
   }
 
   @Test
-  void acceptanceCurrentModeFeedsImmediatelyAndStopsAtZeroFlywheel() {
+  void acceptanceCurrentModeWaitsForSpeedAndStopsOnFirstNotReadyLoop() {
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
     DashboardControlsTestUtil.set(HOOD, 100.0);
     Drum.mInstance.setVelocityRotPerSec(0.0);
@@ -526,18 +553,29 @@ class ShootingTest {
     Indexer.mInstance.periodic();
     Feeder.mInstance.periodic();
     assertEquals(0.0, Drum.mInstance.getVelocityRotPerSec(), EPS, "drum starts stopped");
-    assertEquals(0.0, Hood.mInstance.getPositionRot(), EPS, "hood starts off its 100% target");
 
+    // Energy-save mode feeds with a 50 A current request, but only once the flywheel is at speed:
+    // from a stopped drum the first execute requests the shooter targets and nothing else.
     Shooting s = new Shooting(true);
     s.initialize();
     step(s);
-    assertEquals(MotorIO.ControlMode.CURRENT, Feeder.mInstance.getControlMode());
-    assertEquals(50.0, Feeder.mInstance.getCurrentSetpointAmps(), EPS);
-    assertEquals(MotorIO.ControlMode.CURRENT, Indexer.mInstance.getControlMode());
-    assertEquals(50.0, Indexer.mInstance.getCurrentSetpointAmps(), EPS);
+    assertNotEquals(MotorIO.ControlMode.CURRENT, Feeder.mInstance.getControlMode());
+    assertEquals(0.0, Feeder.mInstance.getCurrentSetpointAmps(), EPS, "no current request yet");
     assertEquals(DrumConstants.MaxShotVelocity, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
     assertEquals(HoodConstants.MaxAngleDeg / 360.0, Hood.mInstance.getPositionSetpointRot(), EPS);
 
+    boolean currentFeeding = false;
+    for (int i = 0; i < 30 && !currentFeeding; i++) {
+      step(s);
+      currentFeeding =
+          Feeder.mInstance.getControlMode() == MotorIO.ControlMode.CURRENT
+              && Math.abs(Feeder.mInstance.getCurrentSetpointAmps() - 50.0) < EPS;
+    }
+    assertTrue(currentFeeding, "energy-save mode feeds at 50 A once at speed");
+    assertEquals(MotorIO.ControlMode.CURRENT, Indexer.mInstance.getControlMode());
+    assertEquals(50.0, Indexer.mInstance.getCurrentSetpointAmps(), EPS);
+
+    // The same-loop stop must drop the current request, not just a velocity setpoint.
     DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
     step(s);
     assertNotEquals(
@@ -553,11 +591,14 @@ class ShootingTest {
     assertEquals(0.0, indexerSetpoint(), EPS);
 
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
-    step(s);
-    assertEquals(MotorIO.ControlMode.CURRENT, Feeder.mInstance.getControlMode());
-    assertEquals(50.0, Feeder.mInstance.getCurrentSetpointAmps(), EPS);
-    assertEquals(MotorIO.ControlMode.CURRENT, Indexer.mInstance.getControlMode());
-    assertEquals(50.0, Indexer.mInstance.getCurrentSetpointAmps(), EPS);
+    currentFeeding = false;
+    for (int i = 0; i < 25 && !currentFeeding; i++) {
+      step(s);
+      currentFeeding =
+          Feeder.mInstance.getControlMode() == MotorIO.ControlMode.CURRENT
+              && Math.abs(Feeder.mInstance.getCurrentSetpointAmps() - 50.0) < EPS;
+    }
+    assertTrue(currentFeeding, "current feed resumes after the recovery window");
     s.end(true);
   }
 
@@ -584,10 +625,15 @@ class ShootingTest {
       for (int i = 0; i < 40 && stateOf(s).equals("UNJAM"); i++) {
         step(s);
       }
-      assertNotEquals("UNJAM", stateOf(s));
+      assertEquals("PAUSED", stateOf(s));
       assertEquals(frozenAt, retractElapsed(s), EPS, "unjam time never counted");
-      step(s);
-      assertTrue(isFeeding(), "feed resumes on the first post-unjam loop");
+
+      boolean resumed = false;
+      for (int i = 0; i < 15 && !resumed; i++) {
+        step(s);
+        resumed = stateOf(s).equals("SHOOT");
+      }
+      assertTrue(resumed, "resumed after the post-unjam stable window");
 
       double retractCm = ShootingConstants.INTAKE_RETRACT_POSITION_CM.getAsDouble();
       for (int i = 0; i < 5; i++) {
@@ -618,11 +664,32 @@ class ShootingTest {
 
     Shooting s = new Shooting(false);
     s.initialize();
-    stepWithPanel(s);
-    assertTrue(isFeeding(), "startup feeds on the first loop");
-    assertEquals(Action.FEEDING, OperatorStatus.currentAction());
-    assertTrue(OperatorStatus.feedAllowed());
-    assertEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());
+    // Startup: the panel must never allow feeding before the control loop enters SHOOT; while the
+    // drum is still below speed the reason is the speed gate, and once at speed but inside the
+    // debounce it is Stabilizing.
+    boolean sawStabilizing = false;
+    boolean reachedShoot = false;
+    for (int i = 0; i < 30 && !reachedShoot; i++) {
+      stepWithPanel(s);
+      String st = stateOf(s);
+      if (st.equals("SHOOT") || st.equals("RETRACT")) {
+        reachedShoot = true;
+        assertTrue(
+            OperatorStatus.feedAllowed(), "panel allows on the same loop control enters SHOOT");
+        assertEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());
+      } else {
+        assertEquals("SPIN_UP", st);
+        assertFalse(OperatorStatus.feedAllowed(), "no early allow at startup, loop " + i);
+        String reason = OperatorStatus.feedBlockedReason();
+        assertTrue(
+            reason.equals(ShotReadiness.REASON_STABILIZING)
+                || reason.equals(ShotReadiness.REASON_DRUM_NOT_AT_SPEED),
+            "startup loop " + i + " reason: " + reason);
+        sawStabilizing |= reason.equals(ShotReadiness.REASON_STABILIZING);
+      }
+    }
+    assertTrue(reachedShoot, "reached SHOOT");
+    assertTrue(sawStabilizing, "the startup debounce phase shows Stabilizing");
 
     DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
     stepWithPanel(s);
@@ -633,12 +700,30 @@ class ShootingTest {
     assertFalse(OperatorStatus.feedAllowed());
     assertEquals(ShotReadiness.REASON_FLYWHEEL_ZERO, OperatorStatus.feedBlockedReason());
 
+    // Recovery: the panel waits out the same spin-up and debounce the control loop does.
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
-    stepWithPanel(s);
-    assertTrue(isFeeding(), "feed resumes on the positive-limit loop");
-    assertEquals(Action.FEEDING, OperatorStatus.currentAction());
-    assertTrue(OperatorStatus.feedAllowed(), "panel allows on the same resume loop");
-    assertEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());
+    boolean resumed = false;
+    boolean sawRecoveryStabilizing = false;
+    for (int i = 0; i < 15 && !resumed; i++) {
+      stepWithPanel(s);
+      String st = stateOf(s);
+      if (st.equals("SHOOT") || st.equals("RETRACT")) {
+        resumed = true;
+        assertTrue(OperatorStatus.feedAllowed(), "panel allows on the resume loop");
+        assertEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());
+      } else {
+        assertEquals("PAUSED", st);
+        assertFalse(OperatorStatus.feedAllowed(), "no early allow during recovery, loop " + i);
+        String reason = OperatorStatus.feedBlockedReason();
+        assertTrue(
+            reason.equals(ShotReadiness.REASON_STABILIZING)
+                || reason.equals(ShotReadiness.REASON_DRUM_NOT_AT_SPEED),
+            "recovery loop " + i + " reason: " + reason);
+        sawRecoveryStabilizing |= reason.equals(ShotReadiness.REASON_STABILIZING);
+      }
+    }
+    assertTrue(resumed, "auto-resumed");
+    assertTrue(sawRecoveryStabilizing, "the recovery debounce phase shows Stabilizing");
 
     // While the jam debounce runs the volley keeps feeding and the panel agrees; in UNJAM the panel
     // shows the jam action and blocks feeding.
@@ -673,11 +758,31 @@ class ShootingTest {
     }
     assertNotEquals("UNJAM", stateOf(s), "back-off ran to completion");
 
-    stepWithPanel(s);
-    assertTrue(isFeeding(), "feed resumes on the first post-unjam loop");
-    assertEquals(Action.FEEDING, OperatorStatus.currentAction());
-    assertTrue(OperatorStatus.feedAllowed(), "no stale jam overlay may block actual feeding");
-    assertEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());
+    // After the back-off the volley must re-earn a fresh stable window: never allowed while
+    // PAUSED, allowed again on the resume loop. The CLEARING_JAM heartbeat stays fresh for its
+    // 0.15 s expiry into the pause, so the panel reason is the jam overlay first, then the
+    // command's own waiting decision.
+    assertEquals("PAUSED", stateOf(s));
+    assertFalse(OperatorStatus.feedAllowed(), "no feeding right after the back-off");
+    resumed = false;
+    for (int i = 0; i < 15 && !resumed; i++) {
+      stepWithPanel(s);
+      // The volley resumes into whichever feeding state the jam interrupted (SHOOT or RETRACT).
+      String st = stateOf(s);
+      if (st.equals("SHOOT") || st.equals("RETRACT")) {
+        resumed = true;
+        assertTrue(OperatorStatus.feedAllowed(), "panel allows on the post-unjam resume loop");
+      } else {
+        assertEquals("PAUSED", st);
+        assertFalse(OperatorStatus.feedAllowed(), "post-unjam debounce loop " + i);
+        String reason = OperatorStatus.feedBlockedReason();
+        assertTrue(
+            reason.equals(ShotReadiness.REASON_CLEARING_JAM)
+                || reason.equals(ShotReadiness.REASON_STABILIZING),
+            "post-unjam loop " + i + " reason: " + reason);
+      }
+    }
+    assertTrue(resumed, "resumed after the post-unjam stable window");
 
     // Key released: end() still stops the motors and clears the command decision. Once the action
     // heartbeat expires, a positive-limit fallback ignores drum/hood readiness diagnostics.
@@ -783,8 +888,7 @@ class ShootingTest {
     assertEquals("PAUSED", stateOf(s));
 
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
-    step(s);
-    assertTrue(isFeeding(), "resumed feeding on the positive-limit loop");
+    assertTrue(stepUntilFeeding(s, 15), "resumed feeding after the recovery window");
 
     // Refresh the indexer inputs before the next execute: step() applies the override in the
     // periodic after execute, so without this the first post-resume jam check would read the
@@ -818,8 +922,7 @@ class ShootingTest {
     assertEquals("PAUSED", stateOf(s));
 
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
-    step(s);
-    assertTrue(isFeeding(), "resumed feeding on the positive-limit loop");
+    assertTrue(stepUntilFeeding(s, 15), "resumed feeding after the recovery window");
 
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
     Indexer.mInstance.periodic();
@@ -855,8 +958,7 @@ class ShootingTest {
       step(s);
     }
     assertNotEquals("UNJAM", stateOf(s));
-    step(s);
-    assertTrue(isFeeding(), "feeding again on the first post-unjam loop");
+    assertTrue(stepUntilFeeding(s, 15), "feeding recovered after the post-unjam window");
 
     // No residual timing from the pre-unjam window may carry over: the first spike after the
     // recovery must again have to persist for the full debounce.
@@ -902,8 +1004,7 @@ class ShootingTest {
     }
 
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
-    step(s);
-    assertTrue(isFeeding(), "feeding resumes on the first positive-limit loop");
+    assertTrue(stepUntilFeeding(s, 25), "feeding resumes after the spin-up and stable window");
 
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
     Indexer.mInstance.periodic(); // the override must reach the input before the next execute
@@ -936,8 +1037,8 @@ class ShootingTest {
         step(s);
       }
       DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
-      step(s);
-      assertTrue(isFeeding(), "resumed feeding on one loop, cycle " + cycle);
+      assertTrue(
+          stepUntilFeeding(s, 15), "resumed feeding after the recovery window, cycle " + cycle);
     }
 
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
@@ -962,8 +1063,15 @@ class ShootingTest {
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(null);
     Indexer.mInstance.periodic();
     assertTrue(!shadowJam.calculate(false), "shadow starts from a clear sample");
-    step(s);
-    assertTrue(isFeeding(), "first execute feeds and gives the jam debouncer a clear sample");
+    // Spin-up loops are not feeding: the command's jam debouncer gets a clear sample each loop,
+    // and the shadow must stay anchored with it or its 0.2 s window would free-run early.
+    boolean feeding = false;
+    for (int i = 0; i < 30 && !feeding; i++) {
+      shadowJam.calculate(false);
+      step(s);
+      feeding = isFeeding();
+    }
+    assertTrue(feeding, "reached SHOOT with the shadow debouncer kept in sync");
 
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
     boolean confirmed = false;
@@ -1038,8 +1146,7 @@ class ShootingTest {
         step(s);
       }
       assertNotEquals("UNJAM", stateOf(s), "back-off " + jam + " completed");
-      step(s);
-      assertTrue(isFeeding(), "feeding recovered immediately after jam " + jam);
+      assertTrue(stepUntilFeeding(s, 15), "feeding recovered after jam " + jam);
     }
     s.end(true);
   }
