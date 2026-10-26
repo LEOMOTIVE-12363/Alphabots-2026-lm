@@ -29,7 +29,7 @@
 | 分支 | 内容 |
 |---|---|
 | `main` | 上游 Alphabots 8810 竞赛代码基线，保留本 fork 的 MIT LICENSE、双语 README 与私有配置退跟踪改动：完整自动程序（Choreo 轨迹 + PathPlanner）、视觉、战术程序 |
-| `demo` | **LEOMOTIVE demo 展示线**（本仓库的日常开发线）：移除全部自动程序与视觉，纯手动驾驶；Elastic 数值输入框直控 Drum 转速 / Hood 俯仰，并新增 demo 调参页；可寻址 LED 灯带（五套《Coco》亡灵节主题＋Off 与纯色/彩虹/追逐/呼吸四个独立模式（2026-10-26 曾精简为三主题＋Off，同日按用户要求全部恢复）；五套主题自 2026-10-26 起统一渲染同一套**橙紫交替融合渐变**（紫 `#7020D0` ↔ 橙 `#FF7900`，路径四等分 ABAB 波段，两端收紫），仅名称与推荐待机动画不同；配置总长 7.0 m 对齐实装灯带；`LED Pattern` / `LED Idle Effect` / `LED Brightness (%)` 由 Elastic 选择并断电持久化，Enable、Disable、空闲、吸球、射球、吐球时都保持同一所选样式，Slow Flow / Chase / Breathe 等用户所选动画仍随时间播放；`Follow Ball Flow` 开关已移除；灯带分段与动画参数待实灯核验；CANdle 已选定为默认驱动，PWM 保留为编译期备用；改 `LEDConstants.HARDWARE` 一个常量即可切换，硬件安装参数与实灯表现仍待核验） |
+| `demo` | **LEOMOTIVE demo 展示线**（本仓库的日常开发线）：移除全部自动程序与视觉，纯手动驾驶；Elastic 数值输入框直控 Drum 转速 / Hood 俯仰，并新增 demo 调参页；可寻址 LED 灯带（五套《Coco》亡灵节主题＋Off 与纯色/彩虹/追逐/呼吸四个独立模式（2026-10-26 曾精简为三主题＋Off，同日按用户要求全部恢复）；五套主题自 2026-10-26 起统一渲染同一套**橙紫交替融合渐变**（紫 `#7020D0` ↔ 橙 `#FF7900`，每约 30 cm 交替一条色带、两端收紫——初版四等分宽波段同日按用户要求收紧），仅名称与推荐待机动画不同；配置总长 7.0 m 对齐实装灯带；`LED Pattern` / `LED Idle Effect` / `LED Brightness (%)` 由 Elastic 选择并断电持久化，Enable、Disable、空闲、吸球、射球、吐球时都保持同一所选样式，Slow Flow / Chase / Breathe 等用户所选动画仍随时间播放；`Follow Ball Flow` 开关已移除；灯带分段与动画参数待实灯核验；CANdle 已选定为默认驱动，PWM 保留为编译期备用；改 `LEDConstants.HARDWARE` 一个常量即可切换，硬件安装参数与实灯表现仍待核验） |
 
 - demo 展示线的功能改动**永不合入 `main`**；每个任务一个独立 PR，base 为 `demo`，自检通过后即合入。仓库共用的中英 README 同步维护：从 `demo` 发起文档改动，再以独立 PR 将相同文案同步至 `main`。
 - 查看 `demo` 相对 `main` 的全部差异，请使用 GitHub Compare：[compare/main...demo](https://github.com/LEOMOTIVE-12363/Alphabots-2026-lm/compare/main...demo)（原先长期保持 open 的总览 PR #2 已于 2026-10-23 关闭，无须常驻 open PR）。
