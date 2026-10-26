@@ -22,14 +22,14 @@ The following capabilities come from the upstream competition code retained on `
 - **Vision** — Limelight (MegaTag2) global pose estimation fused into swerve odometry
 - **AdvantageKit three-mode architecture** — REAL / SIM / REPLAY share one codebase, with deterministic log replay
 - **maple-sim desktop simulation** — 2026 REBUILT arena (HUB / Trench collision geometry) physics sim
-- **Custom Elastic dashboard** — layout versioned in `elastic-layout-1025.json`, plus NetworkTables tuning scripts `scripts/nt_tune.py` / `scripts/pid_analysis.py`
+- **Custom Elastic dashboard** — layout versioned in `elastic-layout-1026.json`, plus NetworkTables tuning scripts `scripts/nt_tune.py` / `scripts/pid_analysis.py`
 
 ## Branch model
 
 | Branch | Contents |
 |---|---|
 | `main` | Upstream Alphabots 8810 competition-code baseline, retaining this fork's MIT LICENSE, bilingual README, and private-config untracking changes: full autonomous (Choreo trajectories + PathPlanner), vision, tactical commands |
-| `demo` | **LEOMOTIVE demo line** (day-to-day development of this fork): all autonomous programs and vision removed, teleop-only; Elastic numeric input fields directly control Drum speed / Hood angle, plus a dedicated demo tuning tab; addressable LED strip (five Día de los Muertos themes; `LED Pattern` / `LED Idle Effect` / `LED Brightness (%)` are selected in Elastic and power-cycle persistent; the same selected appearance remains in Enable, Disable, idle, intake, shooting, and eject states, while user-selected animations such as Slow Flow / Chase / Breathe continue to play over time; the `Follow Ball Flow` toggle has been removed; strip section map and animation numbers pending real-strip verification; CANdle is selected as the default driver, with PWM retained as a compile-time fallback; switching is the single `LEDConstants.HARDWARE` constant, while install parameters and real-strip behavior remain to be verified) |
+| `demo` | **LEOMOTIVE demo line** (day-to-day development of this fork): all autonomous programs and vision removed, teleop-only; Elastic numeric input fields directly control Drum speed / Hood angle, plus a dedicated demo tuning tab; addressable LED strip (three Día de los Muertos themes plus Off — the menu was slimmed to these four options on 2026-10-26, removing the Solid/Rainbow/Chase/Breathe standalone patterns and the Papel Fiesta / Candle Memory themes, with stale saved values falling safely back to the default; `LED Pattern` / `LED Idle Effect` / `LED Brightness (%)` are selected in Elastic and power-cycle persistent; the same selected appearance remains in Enable, Disable, idle, intake, shooting, and eject states, while user-selected animations such as Slow Flow / Chase / Breathe continue to play over time; the `Follow Ball Flow` toggle has been removed; strip section map and animation numbers pending real-strip verification; CANdle is selected as the default driver, with PWM retained as a compile-time fallback; switching is the single `LEDConstants.HARDWARE` constant, while install parameters and real-strip behavior remain to be verified) |
 
 - Demo-line feature changes are **never merged into `main`**; each task lands as its own PR with base `demo`, merged after self-checks pass. The shared Chinese and English READMEs are kept in sync: documentation changes originate on `demo`, then the same text is mirrored to `main` through a separate PR.
 - To inspect the full `demo`-vs-`main` diff, use GitHub Compare: [compare/main...demo](https://github.com/LEOMOTIVE-12363/Alphabots-2026-lm/compare/main...demo) (the former standing-overview PR #2 was closed on 2026-10-23; no open PR is kept for this).
@@ -50,7 +50,7 @@ Driver Station port **1 takes priority over 0** for both driving and every butto
 | Cycle LED themes / idle effects | Back / Start | No LED switching |
 | Reset simulated field (no real-robot action) | Unbound | Start |
 
-On port 1, Back cycles the five themes in the order Marigold Bridge → Festival Night → Papel Fiesta → Alebrije Glow → Candle Memory, and Start cycles the five idle effects in the order Static → Breathe → Slow Flow → Chase → Color Step; each press advances exactly one item. Both operate the existing `LED Pattern` / `LED Idle Effect` choosers, so a change from either the controller or Elastic is reflected as the actual selection on the other side and saved by the existing power-cycle persistence. Changing themes still preselects the recommended idle effect, which can then be overridden with Start or Elastic. From a legacy pattern, Back enters Marigold Bridge while Start leaves both selections unchanged. Port 0 Back is unbound, and port 0 Start remains dedicated to simulated-field reset.
+On port 1, Back cycles the three themes in the order Marigold Bridge → Festival Night → Alebrije Glow (Off stays selectable only from the dashboard), and Start cycles the five idle effects in the order Static → Breathe → Slow Flow → Chase → Color Step; each press advances exactly one item. Both operate the existing `LED Pattern` / `LED Idle Effect` choosers, so a change from either the controller or Elastic is reflected as the actual selection on the other side and saved by the existing power-cycle persistence. Changing themes still preselects the recommended idle effect, which can then be overridden with Start or Elastic. From Off, Back enters Marigold Bridge while Start is a complete no-op that never lights the strip. Port 0 Back is unbound, and port 0 Start remains dedicated to simulated-field reset.
 
 LT extends the intake and runs collection; release stops collection without retracting. D-pad left retracts and homes against the inward stop. LB/RT reverse is momentary: the reverse outputs are recomputed from the active pad's held state — while the controlling pad holds LB the intake roller, indexer, and feeder reverse (RT: indexer/feeder only); they zero on release, disconnect, priority loss when the taking-over pad is not holding the same key, or while the robot is disabled. The bindings take no subsystem ownership, so a concurrently running shooting loop overwrites the reverse writes (original behavior, intentionally unchanged).
 
@@ -69,9 +69,9 @@ The immediate-feed and post-unjam behavior, and the panel, are not yet verified 
 
 ## Elastic LED preview
 
-The `LED Preview` tab in `elastic-layout-1025.json` provides color and animation previews independently of real-strip output. To use it, robot code or desktop simulation must be running and Elastic must be connected to that process's NetworkTables; opening the layout alone does not produce preview data.
+The `LED Preview` tab in `elastic-layout-1026.json` provides color and animation previews independently of real-strip output. To use it, robot code or desktop simulation must be running and Elastic must be connected to that process's NetworkTables; opening the layout alone does not produce preview data.
 
-- The top `LED Pattern` and `LED Idle Effect` controls use the existing setting keys. The large `Current Selection` card previews the selected Pattern (theme Patterns also use the selected Idle Effect); the five fixed cards below show Marigold Bridge / Slow Flow, Festival Night / Breathe, Papel Fiesta / Chase, Alebrije Glow / Slow Flow, and Candle Memory / Static, pairing each theme with its recommended effect.
+- The top `LED Pattern` and `LED Idle Effect` controls use the existing setting keys. The large `Current Selection` card previews the selected Pattern (theme Patterns also use the selected Idle Effect); the three fixed cards below show Marigold Bridge / Slow Flow, Festival Night / Breathe, and Alebrije Glow / Slow Flow, pairing each theme with its recommended effect.
 - Every card is rendered at a fixed reference brightness and does not read or display real-strip state or actual brightness. `LED Brightness (%)` does not scale the previews, and mechanism actions such as intake, shooting, and eject do not interrupt or replace them.
 - These previews compare themes and effects; they do not represent real-strip color or brightness. Screen colors cannot verify physical color order, brightness, power, or section mapping. Previews continue while the robot is `Disabled`; `REPLAY` does not publish these preview topics, so replay does not populate this tab.
 
@@ -93,7 +93,7 @@ The repository includes a GitHub Actions workflow configured to run `./gradlew b
 - `frc.robot.subsystems` — singleton pattern (`public static final mInstance` per subsystem), `X.java` + `XConstants.java` pairs (CAN IDs, gains, sim config).
 - `frc.robot.commands` — one folder per command, each with its own `*Constants.java`.
 - Runtime mode switches on `Constants.currentMode` (REAL / SIM / REPLAY); each subsystem picks its IO implementation accordingly.
-- `elastic-layout-1025.json` — Elastic dashboard layout, kept in sync with the NetworkTables interfaces in code.
+- `elastic-layout-1026.json` — Elastic dashboard layout, kept in sync with the NetworkTables interfaces in code.
 
 ## Development workflow & decision records
 
