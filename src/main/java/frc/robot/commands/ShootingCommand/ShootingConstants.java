@@ -12,13 +12,24 @@ public final class ShootingConstants {
       new LoggedTunableNumber("Shooting/FeederRotps", 80);
 
   // Flywheel-speed feed gate: the drum must sit within this tolerance of the limited target,
-  // held for READY_DEBOUNCE_SEC, before any ball is fed. The hood tolerance is a logged
+  // held for READY_DEBOUNCE_SEC, before any ball is fed. Widened from ±1.0 to ±3.0 rot/s on
+  // 2026-10-26 after the real robot never entered the window at ANY flywheel percentage — the
+  // drum's velocity loop is pure-P (kI = 0), so load current leaves a standing error of
+  // (current gap / kP) rot/s that a 1.5%-of-target window cannot absorb. ±3.0 is a preview
+  // value pending real-robot Target-vs-Actual readings. The hood tolerance is a logged
   // diagnostic only — the hood never gates feeding.
-  public static final double SHOOTER_VELOCITY_TOLERANCE_ROTPS = 1.;
+  public static final double SHOOTER_VELOCITY_TOLERANCE_ROTPS = 3.;
   public static final double HOOD_ANGLE_TOLERANCE_ROT = 0.02;
 
   // Stable window the flywheel-speed gate requires before feeding starts or resumes.
   public static final double READY_DEBOUNCE_SEC = 0.15;
+
+  // If the gate still has not released feeding after this much accumulated waiting (spin-up
+  // plus below-speed pauses; a 0% limit never counts), the volley force-feeds for the rest of
+  // the press: the speed gate is latched off until the button is released, so balls always come
+  // out. Operator-settled value (2026-10-26); tunable so the robot can adjust without a redeploy.
+  public static final LoggedTunableNumber FEED_FORCE_TIMEOUT_SEC =
+      new LoggedTunableNumber("Shooting/ForceFeedTimeoutSec", 3.0);
 
   // Indexer jam detection during SHOOT/RETRACT: stator current continuously above this threshold
   // for the debounce time means a ball is stalled against the indexer (free-running feed draws far

@@ -1,6 +1,8 @@
 package frc.robot.commands.ManualCommand;
 
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
+import frc.robot.commands.ShootingCommand.ShootingConstants;
 import frc.robot.subsystems.Drum.Drum;
 import frc.robot.subsystems.Feeder.Feeder;
 import frc.robot.subsystems.Hood.Hood;
@@ -10,19 +12,25 @@ import frc.robot.subsystems.IntakeRoller.IntakeRoller;
 import frc.robot.util.BallFlowTracker;
 import frc.robot.util.OperatorStatus;
 import frc.robot.util.ShotReadiness;
+import org.littletonrobotics.junction.Logger;
 
 /**
  * X-button fixed-setpoint shot path. Every execute drives the drum and hood to the current Manual
  * targets; feeding runs only while the flywheel is actually at the Manual speed target (stable
  * after the 0.15 s window) and the flywheel limit is positive. The hood never gates feeding. A zero
  * flywheel limit or a below-speed measurement stops only the feed path for that loop, and feeding
- * resumes by itself once the shot is stable-ready again.
+ * resumes by itself once the shot is stable-ready again. The same force-feed timeout as Shooting
+ * applies: waiting at a positive limit for {@link ShootingConstants#FEED_FORCE_TIMEOUT_SEC} latches
+ * the speed gate off for the rest of the press, so balls always come out.
  */
 public class Manual extends Command {
   // Shared readiness rule with this command's own debounce, so a fresh press re-earns the full
   // stable window against the Manual targets.
   private final ShotReadiness readiness = new ShotReadiness();
   private ShotReadiness.Evaluation lastEvaluation;
+  // Force-feed timeout accumulator (positive-limit waiting only) and latch, reset per press.
+  private final Timer gateWaitTimer = new Timer();
+  private boolean forceFeedActive;
 
   public Manual() {
     addRequirements(
@@ -37,6 +45,9 @@ public class Manual extends Command {
   @Override
   public void initialize() {
     readiness.reset();
+    gateWaitTimer.stop();
+    gateWaitTimer.reset();
+    forceFeedActive = false;
   }
 
   @Override
@@ -49,23 +60,39 @@ public class Manual extends Command {
             ManualConstants.HoodDegTunable.getAsDouble() / 360.);
 
     // stableReady drops on the first below-speed sample (same-loop stop) and only turns true after
-    // the full 0.15 s window, so the entry is debounced while the exit stays immediate.
-    if (!lastEvaluation.stableReady()) {
+    // the full 0.15 s window, so the entry is debounced while the exit stays immediate. Waiting at
+    // a positive limit accumulates toward the force-feed timeout (0% never counts and always stops
+    // the feed path, even after the latch); once the timeout elapses the gate latches off for the
+    // rest of the press.
+    if (lastEvaluation.flywheelZero()) {
+      gateWaitTimer.stop();
       IntakeRoller.mInstance.setV(0);
       Indexer.mInstance.setV(0);
       Feeder.mInstance.setV(0);
-      OperatorStatus.report(
-          lastEvaluation.flywheelZero()
-              ? OperatorStatus.Action.WAITING_RECOVERY
-              : OperatorStatus.Action.SPINNING_UP);
-      OperatorStatus.reportFeedDecision(
-          false,
-          lastEvaluation.flywheelZero()
-              ? ShotReadiness.REASON_FLYWHEEL_ZERO
-              : lastEvaluation.drumReady()
-                  ? ShotReadiness.REASON_STABILIZING
-                  : ShotReadiness.REASON_DRUM_NOT_AT_SPEED);
+      OperatorStatus.report(OperatorStatus.Action.WAITING_RECOVERY);
+      OperatorStatus.reportFeedDecision(false, ShotReadiness.REASON_FLYWHEEL_ZERO);
       return;
+    }
+    if (!lastEvaluation.stableReady()) {
+      gateWaitTimer.start();
+      if (gateWaitTimer.hasElapsed(ShootingConstants.FEED_FORCE_TIMEOUT_SEC.getAsDouble())) {
+        forceFeedActive = true;
+      }
+      if (!forceFeedActive) {
+        IntakeRoller.mInstance.setV(0);
+        Indexer.mInstance.setV(0);
+        Feeder.mInstance.setV(0);
+        OperatorStatus.report(OperatorStatus.Action.SPINNING_UP);
+        OperatorStatus.reportFeedDecision(
+            false,
+            lastEvaluation.drumReady()
+                ? ShotReadiness.REASON_STABILIZING
+                : ShotReadiness.REASON_DRUM_NOT_AT_SPEED);
+        return;
+      }
+    } else {
+      gateWaitTimer.stop();
+      gateWaitTimer.reset();
     }
 
     IntakeRoller.mInstance.setVelocityRotPerSec(
@@ -75,6 +102,7 @@ public class Manual extends Command {
     BallFlowTracker.report(BallFlowTracker.FlowKind.FEED);
     OperatorStatus.report(OperatorStatus.Action.FEEDING);
     OperatorStatus.reportFeedDecision(true, ShotReadiness.REASON_NONE);
+    Logger.recordOutput("Manual/forceFeed", forceFeedActive);
   }
 
   @Override

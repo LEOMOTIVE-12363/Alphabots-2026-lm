@@ -33,6 +33,12 @@ import org.littletonrobotics.junction.Logger;
  * auto-resumes the volley exactly where it left off, without the driver releasing the button. A
  * pause freezes the retract timer mid-count, so paused time never counts toward the retract delay.
  *
+ * <p>Force-feed timeout: if the gate still has not released feeding after {@link
+ * ShootingConstants#FEED_FORCE_TIMEOUT_SEC} of accumulated waiting (spin-up plus below-speed
+ * pauses; a 0% limit never counts), the volley force-feeds for the rest of the press — the speed
+ * gate latches off until the button is released, so balls always come out even when the drum can
+ * never reach its target (a pure-P velocity loop leaves a standing error under load).
+ *
  * <p>UNJAM always runs its back-off to completion regardless of readiness — clearing a jam is never
  * suppressed by the not-ready gate — then routes through PAUSED instead of resuming directly, so
  * forward feeding restarts only once the flywheel is stable-ready again (it may have sagged while
@@ -77,6 +83,13 @@ public class Shooting extends Command {
   private final ShotReadiness readiness = new ShotReadiness();
   private ShotReadiness.Evaluation lastEvaluation;
 
+  // Force-feed timeout: accumulates only while the gate is actually holding feeding back at a
+  // positive limit (SPIN_UP and below-speed PAUSED; a 0% limit never counts). Once the wait
+  // exceeds FEED_FORCE_TIMEOUT_SEC the volley force-feeds for the rest of the press — the speed
+  // gate latches off so balls always come out — until the button is released and re-pressed.
+  private final Timer gateWaitTimer = new Timer();
+  private boolean forceFeedActive;
+
   public Shooting(boolean isEnergySave) {
     addRequirements(
         Drum.mInstance,
@@ -94,8 +107,33 @@ public class Shooting extends Command {
     retractTimerStarted = false;
     retractTimer.stop();
     retractTimer.reset();
+    gateWaitTimer.stop();
+    gateWaitTimer.reset();
+    forceFeedActive = false;
     readiness.reset();
     resetJamDetection();
+  }
+
+  /**
+   * Tracks the accumulated gate wait for the current non-feeding loop: counting only at a positive
+   * limit (a 0% limit is the operator deliberately holding the drum stopped and never times into
+   * feeding), and latching force-feed once the timeout elapses.
+   */
+  private void trackGateWait(boolean gateHoldingAtPositiveLimit) {
+    if (gateHoldingAtPositiveLimit) {
+      gateWaitTimer.start();
+      if (gateWaitTimer.hasElapsed(ShootingConstants.FEED_FORCE_TIMEOUT_SEC.getAsDouble())) {
+        forceFeedActive = true;
+      }
+    } else {
+      gateWaitTimer.stop();
+    }
+  }
+
+  /** Clears the wait accumulator; called on every loop that actually feeds. */
+  private void clearGateWait() {
+    gateWaitTimer.stop();
+    gateWaitTimer.reset();
   }
 
   /** Hood target in mechanism rotations, from the Hood Angle (%) entry. */
@@ -237,16 +275,25 @@ public class Shooting extends Command {
     if (checkJamAndStartUnjam(States.SHOOT)) {
       return;
     }
+    // A 0% limit always pauses, even after the force-feed timeout: the operator is deliberately
+    // holding the drum stopped.
+    if (lastEvaluation.flywheelZero()) {
+      enterPause(States.SHOOT);
+      holdPauseOutputs();
+      holdJamNotDetected();
+      return;
+    }
     // Losing flywheel speed mid-volley pauses feeding on this very loop — the feed path stops now,
-    // not next loop (a 0% limit also reads not-ready); PAUSED auto-resumes the volley once the
-    // shot is stable-ready again.
-    if (!lastEvaluation.rawReady()) {
+    // not next loop; PAUSED auto-resumes the volley once the shot is stable-ready again. After the
+    // force-feed timeout latches, the speed gate no longer pauses this volley.
+    if (!forceFeedActive && !lastEvaluation.rawReady()) {
       enterPause(States.SHOOT);
       holdPauseOutputs();
       holdJamNotDetected();
       return;
     }
 
+    clearGateWait();
     prepareShooter();
     runFeed();
     startOrResumeRetractTimer();
@@ -259,13 +306,20 @@ public class Shooting extends Command {
     if (checkJamAndStartUnjam(States.RETRACT)) {
       return;
     }
-    if (!lastEvaluation.rawReady()) {
+    if (lastEvaluation.flywheelZero()) {
+      enterPause(States.RETRACT);
+      holdPauseOutputs();
+      holdJamNotDetected();
+      return;
+    }
+    if (!forceFeedActive && !lastEvaluation.rawReady()) {
       enterPause(States.RETRACT);
       holdPauseOutputs();
       holdJamNotDetected();
       return;
     }
 
+    clearGateWait();
     prepareShooter();
     runFeed();
     startOrResumeRetractTimer();
@@ -300,12 +354,30 @@ public class Shooting extends Command {
 
   /** Hold at 0% or while the flywheel is below speed, then resume the remembered feeding state. */
   private void paused() {
-    if (!lastEvaluation.stableReady()) {
+    if (lastEvaluation.flywheelZero()) {
+      trackGateWait(false); // a 0% limit never accumulates toward the force-feed timeout
       holdPauseOutputs();
       holdJamNotDetected();
       return;
     }
+    if (!forceFeedActive && !lastEvaluation.stableReady()) {
+      // Below speed at a positive limit: accumulate the wait; once the timeout elapses the latch
+      // closes and the volley resumes feeding on this very loop.
+      trackGateWait(true);
+      holdPauseOutputs();
+      holdJamNotDetected();
+      if (forceFeedActive) {
+        resumeFromPause();
+      }
+      return;
+    }
 
+    resumeFromPause();
+  }
+
+  /** Restore the remembered feeding state from PAUSED on this loop. */
+  private void resumeFromPause() {
+    clearGateWait();
     state = stateAfterPause;
     if (state == States.RETRACT) {
       retract();
@@ -325,6 +397,13 @@ public class Shooting extends Command {
     holdJamNotDetected();
 
     if (lastEvaluation.stableReady()) {
+      state = States.SHOOT;
+      return;
+    }
+    // Waiting at a positive limit accumulates toward the force-feed timeout (0% does not); once
+    // it elapses the volley starts feeding even though the flywheel never reached its target.
+    trackGateWait(!lastEvaluation.flywheelZero());
+    if (forceFeedActive) {
       state = States.SHOOT;
     }
   }
@@ -382,6 +461,7 @@ public class Shooting extends Command {
     }
     Logger.recordOutput("Shooting/state", state.toString());
     Logger.recordOutput("Shooting/stableReady", lastEvaluation.stableReady());
+    Logger.recordOutput("Shooting/forceFeed", forceFeedActive);
   }
 
   @Override

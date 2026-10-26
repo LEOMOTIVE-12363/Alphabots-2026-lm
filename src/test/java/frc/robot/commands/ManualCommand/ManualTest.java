@@ -317,6 +317,46 @@ class ManualTest {
   }
 
   @Test
+  void forceFeedTimeoutReleasesAPermanentlyBelowSpeedDrum() throws Exception {
+    Manual manual = new Manual();
+    manual.initialize();
+    stepUntilFeeding(manual, 50);
+
+    // Sustained below-speed measurement: the gate holds for the 3 s timeout (150 loops of
+    // 0.02 s — Manual accumulates from the first waiting loop), then force-feeds.
+    for (int i = 0; i < 156; i++) {
+      injectDrumVelocity(0.0);
+      step(manual);
+      if (i < 150) {
+        assertEquals(
+            0.0,
+            Feeder.mInstance.getVelocitySetpointRotPerSec(),
+            EPS,
+            "gate holds before the timeout, loop " + i);
+      }
+    }
+    assertTrue(Feeder.mInstance.getVelocitySetpointRotPerSec() > 0, "force-feed after the timeout");
+
+    // 0% still stops a latched force-feed, and the latch survives the 0% hold.
+    DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
+    step(manual);
+    assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS);
+    DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+    injectDrumVelocity(0.0);
+    step(manual);
+    assertTrue(
+        Feeder.mInstance.getVelocitySetpointRotPerSec() > 0, "latch persists across the 0% hold");
+
+    // A fresh press re-arms the gate.
+    manual.end(true);
+    manual.initialize();
+    injectDrumVelocity(0.0);
+    step(manual);
+    assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS, "fresh press re-arms");
+    manual.end(true);
+  }
+
+  @Test
   void acceptanceManualStopsOnFirstZeroFlywheelLoop() {
     Manual manual = new Manual();
     manual.initialize();
