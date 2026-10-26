@@ -31,6 +31,15 @@ public enum LEDTheme {
   private static final double FUSION_BAND_METERS = 0.3;
 
   /**
+   * The fusion orange stop (user decision 2026-10-26: the first cut #FF7900 read "偏黄偏绿" on the real
+   * COB strip — its green weight pushes amber toward yellow-green there). Safety orange #FF6600
+   * cuts green by ~16% for a clearly orange reading; purple #7020D0 was approved as-is.
+   */
+  private static final int FUSION_PURPLE = 0x7020D0;
+
+  private static final int FUSION_ORANGE = 0xFF6600;
+
+  /**
    * The alternating fusion stop set over the configured strip: purple at u=0, then orange and
    * purple alternating every {@link #FUSION_BAND_METERS}, ending on purple at u=1. Stop positions
    * derive from {@link LEDConstants#LENGTH_METERS} so a future length edit keeps the physical
@@ -41,7 +50,7 @@ public enum LEDTheme {
     GradientStop[] stops = new GradientStop[bands + 1];
     for (int k = 0; k <= bands; k++) {
       double u = Math.min(k * FUSION_BAND_METERS / LEDConstants.LENGTH_METERS, 1.0);
-      stops[k] = new GradientStop(u, k % 2 == 0 ? 0x7020D0 : 0xFF7900);
+      stops[k] = new GradientStop(u, k % 2 == 0 ? FUSION_PURPLE : FUSION_ORANGE);
     }
     return stops;
   }
