@@ -317,14 +317,42 @@ class ManualTest {
   }
 
   @Test
-  void forceFeedTimeoutReleasesAPermanentlyBelowSpeedDrum() throws Exception {
+  void accumulatedWaitSurvivesBriefFeedingRecovery() throws Exception {
+    // ADR 0021: the timeout accumulates across the whole press; a brief feeding recovery must
+    // not reset it (the 2026-10-27 acceptance reproduction applies to Manual too).
     Manual manual = new Manual();
     manual.initialize();
     stepUntilFeeding(manual, 50);
 
-    // Sustained below-speed measurement: the gate holds for the 3 s timeout (150 loops of
-    // 0.02 s — Manual accumulates from the first waiting loop), then force-feeds.
-    for (int i = 0; i < 156; i++) {
+    for (int i = 0; i < 90; i++) { // segment 1: below speed 1.8 s
+      injectDrumVelocity(0.0);
+      step(manual);
+      assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS, "seg 1 loop " + i);
+    }
+
+    stepUntilFeeding(manual, 15); // brief recovery feeds (fails the test if it never does)
+    for (int i = 0; i < 20; i++) { // feed ~0.4 s
+      step(manual);
+      assertTrue(Feeder.mInstance.getVelocitySetpointRotPerSec() > 0, "brief recovery loop " + i);
+    }
+
+    boolean forceFed = false;
+    for (int i = 0; i < 95 && !forceFed; i++) { // segment 2: below speed again 1.8 s
+      injectDrumVelocity(0.0);
+      step(manual);
+      forceFed = Feeder.mInstance.getVelocitySetpointRotPerSec() > 0;
+    }
+    assertTrue(forceFed, "accumulated 1.8 + 1.8 s of waiting must trigger force-feed");
+    manual.end(true);
+  }
+
+  @Test
+  void forceFeedTimeoutReleasesAPermanentlyBelowSpeedDrum() throws Exception {
+    Manual manual = new Manual();
+    manual.initialize();
+    // Inject from the first execute so the wait accumulates from the start; 3 s = 150 loops of
+    // 0.02 s, then force-feed.
+    for (int i = 0; i < 160; i++) {
       injectDrumVelocity(0.0);
       step(manual);
       if (i < 150) {

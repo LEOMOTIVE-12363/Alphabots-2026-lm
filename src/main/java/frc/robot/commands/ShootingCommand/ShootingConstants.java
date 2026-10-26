@@ -24,12 +24,9 @@ public final class ShootingConstants {
   // Stable window the flywheel-speed gate requires before feeding starts or resumes.
   public static final double READY_DEBOUNCE_SEC = 0.15;
 
-  // If the gate still has not released feeding after this much accumulated waiting (spin-up
-  // plus below-speed pauses; a 0% limit never counts), the volley force-feeds for the rest of
-  // the press: the speed gate is latched off until the button is released, so balls always come
-  // out. Operator-settled value (2026-10-26); tunable so the robot can adjust without a redeploy.
-  public static final LoggedTunableNumber FEED_FORCE_TIMEOUT_SEC =
-      new LoggedTunableNumber("Shooting/ForceFeedTimeoutSec", 3.0);
+  // The force-feed timeout lives in DashboardControls ("/SmartDashboard/Force Feed Timeout (s)",
+  // default 3 s) so it is operator-editable on the demo tab and power-cycle persistent like the
+  // other Elastic settings (2026-10-27 acceptance fix).
 
   // Indexer jam detection during SHOOT/RETRACT: stator current continuously above this threshold
   // for the debounce time means a ball is stalled against the indexer (free-running feed draws far

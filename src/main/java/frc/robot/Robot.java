@@ -96,6 +96,11 @@ public class Robot extends LoggedRobot {
     // the Command-based framework to work.
     CommandScheduler.getInstance().run();
 
+    // Latched-intake edge polling runs after the scheduler so onlyWhile teardowns (priority loss,
+    // disconnect, disable) land in the same loop they happen in; see RobotContainer's note for
+    // why the latch cannot use a scheduler trigger edge.
+    robotContainer.pollIntakeLatch();
+
     // Operator panel state (mechanism action + feed readiness) tracks the control decisions
     // every loop; only the SmartDashboard publish below is rate-limited to human frequency.
     OperatorStatus.update();

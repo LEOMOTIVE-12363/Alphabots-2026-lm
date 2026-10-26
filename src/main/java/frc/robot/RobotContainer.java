@@ -72,9 +72,22 @@ public class RobotContainer {
   // source port disconnects or loses priority, and the scheduler cancels it on disable, so
   // neither resumes by itself; the operator presses LT again. intakeLatchSource records which
   // port owns the running latch for that guard.
+  //
+  // Edge semantics (2026-10-27 acceptance fix, ADR 0016): the toggle is driven by REAL button
+  // edges polled every loop — not by a "has control AND pressed" trigger, whose condition
+  // regaining truth masquerades as a press when control returns to a pad still holding LT.
+  // A port whose latch was torn down while its LT was held must first OBSERVE a release before
+  // its next press counts (intakeAwaitingRelease); while a pad is disconnected its button reads
+  // are garbage, so its edge state is frozen and the reconnect loop only resynchronizes the
+  // baseline — a hold that spanned the disconnect is not a new press either.
   private int intakeLatchSource = -1;
   private final Command latchedIntake =
       new IntakeCommand().onlyWhile(() -> controls.activePort() == intakeLatchSource);
+  private final boolean[] intakeHeldLastLoop = new boolean[2];
+  private final boolean[] intakeConnectedLastLoop = new boolean[2];
+  private final boolean[] intakeAwaitingRelease = new boolean[2];
+  private boolean intakeLatchWasScheduled;
+  private int lastIntakeLatchSource = -1;
 
   /** The container for the robot. Contains subsystems, OI devices, and commands. */
   public RobotContainer() {
@@ -162,7 +175,9 @@ public class RobotContainer {
         Action.RETRACT,
         () -> new IntakeDeployZeroCommand(IntakeDeployZeroCommand.Direction.INWARD));
     controls.onPress(Action.RESET_HEADING, this::resetHeadingCommand);
-    controls.onPress(Action.INTAKE, this::intakeToggleCommand);
+    // INTAKE (LT) is NOT bound here: its latch is driven by pollIntakeLatch()'s real-edge state
+    // machine (see the latched-intake note above) so a control-priority change can never
+    // masquerade as a fresh press.
     controls.whileHeld(Action.SHOOT, () -> new Shooting(false));
     controls.onPress(Action.EJECT, this::reverseFeedPressCommand);
     // The outtake press also drops the intake latch — see stopLatchedIntakeCommand for why this
@@ -239,28 +254,70 @@ public class RobotContainer {
   }
 
   /**
-   * Toggles the latched intake (2026-10-26): first press schedules it until further notice, second
-   * press cancels. The toggle runs during the button poll — an InstantCommand's initialize fires at
-   * schedule time, before the scheduler sets m_inRunLoop — so schedule() and cancel() here take the
-   * scheduler's immediate path and isScheduled() reflects the latch the moment this returns. A
-   * press while disabled is dropped by the scheduler before the toggle runs, so nothing latches
-   * across a disable; only the port that currently has control can toggle, and a
-   * disconnect/priority loss tears the running latch down via onlyWhile.
+   * Toggles the latched intake from a REAL LT press on {@code port}. Runs from the poll loop (not
+   * from a scheduler trigger): schedule() and cancel() here take the scheduler's immediate path
+   * because the poll runs outside the scheduler's execute phase, and isScheduled() reflects the
+   * latch the moment this returns. A toggle while disabled is dropped by the scheduler before the
+   * latch schedules, so nothing latches across a disable.
    */
-  private Command intakeToggleCommand() {
-    return Commands.runOnce(
-        () -> {
-          if (latchedIntake.isScheduled()) {
-            latchedIntake.cancel();
-            intakeLatchSource = -1;
-          } else {
-            intakeLatchSource = controls.activePort();
-            latchedIntake.schedule();
-            if (!latchedIntake.isScheduled()) {
-              intakeLatchSource = -1; // scheduler dropped it (e.g. disabled): not latched
-            }
-          }
-        });
+  private void toggleLatchedIntake(int port) {
+    if (latchedIntake.isScheduled()) {
+      latchedIntake.cancel();
+      intakeLatchSource = -1;
+    } else {
+      intakeLatchSource = port;
+      lastIntakeLatchSource = port;
+      latchedIntake.schedule();
+      if (!latchedIntake.isScheduled()) {
+        intakeLatchSource = -1; // scheduler dropped it (e.g. disabled): not latched
+      }
+    }
+  }
+
+  /**
+   * Real-edge poll for the latched intake — call every robot loop after the scheduler runs. See the
+   * latched-intake field note for the semantics: only a physical press observed while the pad is
+   * connected AND in control toggles the latch; a latch torn down while LT was held (priority loss,
+   * disconnect, disable, LB, interruption) requires an observed release first; a disconnect freezes
+   * the edge state and a reconnect only resynchronizes it.
+   */
+  public void pollIntakeLatch() {
+    for (int port = DriverControls.FULL_PORT; port <= DriverControls.DEMO_PORT; port++) {
+      boolean connected = DriverStation.isJoystickConnected(port);
+      boolean connectedLastLoop = intakeConnectedLastLoop[port];
+      intakeConnectedLastLoop[port] = connected;
+      if (!connected) {
+        continue; // button reads are garbage while unplugged: freeze this port's edge state
+      }
+      boolean held = controls.isHeldByPort(port, Action.INTAKE);
+      if (!connectedLastLoop) {
+        // Reconnect loop: resynchronize the baseline only. A hold that spanned the disconnect is
+        // not a new press; a press made during the disconnect becomes a press only on its next
+        // real edge, which is the conservative reading.
+        intakeHeldLastLoop[port] = held;
+        continue;
+      }
+      boolean rising = held && !intakeHeldLastLoop[port];
+      intakeHeldLastLoop[port] = held;
+      if (!held) {
+        intakeAwaitingRelease[port] = false; // a release observed while connected clears the gate
+      }
+      if (rising
+          && !intakeAwaitingRelease[port]
+          && controls.activePort() == port
+          && !DriverStation.isDisabled()) {
+        toggleLatchedIntake(port);
+      }
+    }
+
+    if (intakeLatchWasScheduled && !latchedIntake.isScheduled() && lastIntakeLatchSource >= 0) {
+      // The latch was torn down this loop (onlyWhile, disable, LB, interruption — or this poll's
+      // own toggle-off, which is harmless). If the source pad still holds LT, require a release.
+      if (intakeHeldLastLoop[lastIntakeLatchSource]) {
+        intakeAwaitingRelease[lastIntakeLatchSource] = true;
+      }
+    }
+    intakeLatchWasScheduled = latchedIntake.isScheduled();
   }
 
   /**

@@ -34,10 +34,11 @@ import org.littletonrobotics.junction.Logger;
  * pause freezes the retract timer mid-count, so paused time never counts toward the retract delay.
  *
  * <p>Force-feed timeout: if the gate still has not released feeding after {@link
- * ShootingConstants#FEED_FORCE_TIMEOUT_SEC} of accumulated waiting (spin-up plus below-speed
- * pauses; a 0% limit never counts), the volley force-feeds for the rest of the press — the speed
- * gate latches off until the button is released, so balls always come out even when the drum can
- * never reach its target (a pure-P velocity loop leaves a standing error under load).
+ * DashboardControls#getForceFeedTimeoutSec} (default 3 s, Elastic-persisted) of accumulated waiting
+ * (spin-up plus below-speed pauses; a 0% limit never counts), the volley force-feeds for the rest
+ * of the press — the speed gate latches off until the button is released, so balls always come out
+ * even when the drum can never reach its target (a pure-P velocity loop leaves a standing error
+ * under load).
  *
  * <p>UNJAM always runs its back-off to completion regardless of readiness — clearing a jam is never
  * suppressed by the not-ready gate — then routes through PAUSED instead of resuming directly, so
@@ -85,7 +86,7 @@ public class Shooting extends Command {
 
   // Force-feed timeout: accumulates only while the gate is actually holding feeding back at a
   // positive limit (SPIN_UP and below-speed PAUSED; a 0% limit never counts). Once the wait
-  // exceeds FEED_FORCE_TIMEOUT_SEC the volley force-feeds for the rest of the press — the speed
+  // exceeds the configured timeout the volley force-feeds for the rest of the press — the speed
   // gate latches off so balls always come out — until the button is released and re-pressed.
   private final Timer gateWaitTimer = new Timer();
   private boolean forceFeedActive;
@@ -122,7 +123,7 @@ public class Shooting extends Command {
   private void trackGateWait(boolean gateHoldingAtPositiveLimit) {
     if (gateHoldingAtPositiveLimit) {
       gateWaitTimer.start();
-      if (gateWaitTimer.hasElapsed(ShootingConstants.FEED_FORCE_TIMEOUT_SEC.getAsDouble())) {
+      if (gateWaitTimer.hasElapsed(DashboardControls.getForceFeedTimeoutSec())) {
         forceFeedActive = true;
       }
     } else {
@@ -130,10 +131,14 @@ public class Shooting extends Command {
     }
   }
 
-  /** Clears the wait accumulator; called on every loop that actually feeds. */
-  private void clearGateWait() {
+  /**
+   * Pauses the wait accumulator WITHOUT clearing it (2026-10-27 acceptance fix): the timeout is
+   * accumulated across the whole press, so a brief feeding recovery must not reset the wait —
+   * stuttering speed would otherwise keep postponing the fallback forever. Only initialize() resets
+   * the accumulator (a fresh press).
+   */
+  private void pauseGateWait() {
     gateWaitTimer.stop();
-    gateWaitTimer.reset();
   }
 
   /** Hood target in mechanism rotations, from the Hood Angle (%) entry. */
@@ -233,8 +238,10 @@ public class Shooting extends Command {
    * readiness — clearing a jam must never be suppressed by the not-ready gate.
    */
   private void unjam() {
-    // Back-off time must not pre-fill the next jam confirmation window.
+    // Back-off time must not pre-fill the next jam confirmation window, and it is not gate
+    // waiting either: pause (not clear) the accumulated force-feed wait.
     holdJamNotDetected();
+    pauseGateWait();
     if (!unjamTimer.hasElapsed(ShootingConstants.UNJAM_DURATION_SEC.getAsDouble())) {
       writeUnjamOutputs();
       return;
@@ -293,7 +300,7 @@ public class Shooting extends Command {
       return;
     }
 
-    clearGateWait();
+    pauseGateWait();
     prepareShooter();
     runFeed();
     startOrResumeRetractTimer();
@@ -319,7 +326,7 @@ public class Shooting extends Command {
       return;
     }
 
-    clearGateWait();
+    pauseGateWait();
     prepareShooter();
     runFeed();
     startOrResumeRetractTimer();
@@ -377,7 +384,7 @@ public class Shooting extends Command {
 
   /** Restore the remembered feeding state from PAUSED on this loop. */
   private void resumeFromPause() {
-    clearGateWait();
+    pauseGateWait();
     state = stateAfterPause;
     if (state == States.RETRACT) {
       retract();
