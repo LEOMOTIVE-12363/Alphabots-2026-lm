@@ -1,4 +1,4 @@
-# 0015 — Latched intake toggle (LT press on / press off)
+# 0016 — Latched intake toggle (LT press on / press off)
 
 - Date: 2026-10-26
 - Status: Accepted
