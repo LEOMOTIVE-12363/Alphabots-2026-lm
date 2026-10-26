@@ -9,7 +9,10 @@ import edu.wpi.first.wpilibj.util.Color;
  * smoothstep easing — never around the HSV wheel — so the designed hues render exactly and no
  * unintended hues appear between stops.
  *
- * <p>The stop RGB values are the approved design inputs; keep them verbatim.
+ * <p>The stop RGB values are the approved design inputs; keep them verbatim. The menu was reduced
+ * to these three themes on 2026-10-26 (user decision): orange+gold Marigold Bridge, orange+purple
+ * Festival Night, and teal+rose Alebrije Glow. Festival Night keeps its name but dropped its rose
+ * middle stop, so saved settings restore straight into the new two-color gradient.
  */
 public enum LEDTheme {
   MARIGOLD_BRIDGE(
@@ -22,26 +25,13 @@ public enum LEDTheme {
       "Festival Night",
       IdleEffect.BREATHE,
       new GradientStop(0.0, 0x7020D0),
-      new GradientStop(0.70, 0xFF167A),
       new GradientStop(1.0, 0xFF7900)),
-  PAPEL_FIESTA(
-      "Papel Fiesta",
-      IdleEffect.CHASE,
-      new GradientStop(0.0, 0xFF7900),
-      new GradientStop(0.33, 0xFF167A),
-      new GradientStop(0.67, 0x00C9AD),
-      new GradientStop(1.0, 0xFFD040)),
   ALEBRIJE_GLOW(
       "Alebrije Glow",
       IdleEffect.SLOW_FLOW,
       new GradientStop(0.0, 0x5636FF),
       new GradientStop(0.60, 0x00D6B2),
-      new GradientStop(1.0, 0xFF248C)),
-  CANDLE_MEMORY(
-      "Candle Memory",
-      IdleEffect.STATIC,
-      new GradientStop(0.0, 0xFF9500),
-      new GradientStop(1.0, 0xFFC15A));
+      new GradientStop(1.0, 0xFF248C));
 
   /** One gradient stop: path position u and the packed 0xRRGGBB design color. */
   private record GradientStop(double u, int rgb) {

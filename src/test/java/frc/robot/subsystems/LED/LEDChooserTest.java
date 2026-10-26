@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -30,18 +31,7 @@ class LEDChooserTest {
   @Test
   void ledPatternOptionsStartWithOffAndKeepMarigoldBridgeAsDefault() {
     NetworkTableInstance nt = NetworkTableInstance.getDefault();
-    String[] expectedOptions = {
-      "Off",
-      "Marigold Bridge",
-      "Solid",
-      "Rainbow",
-      "Chase",
-      "Breathe",
-      "Festival Night",
-      "Papel Fiesta",
-      "Alebrije Glow",
-      "Candle Memory"
-    };
+    String[] expectedOptions = {"Off", "Marigold Bridge", "Festival Night", "Alebrije Glow"};
 
     assertAll(
         () ->
@@ -54,6 +44,32 @@ class LEDChooserTest {
                 "Marigold Bridge",
                 nt.getEntry(CHOOSER_PATH + "/default").getString(""),
                 "moving Off first must not make it the startup default"));
+  }
+
+  /**
+   * Boot-restore migration (menu reduced 2026-10-26): kept names resolve to themselves, Off stays
+   * Off, and every name removed from the menu — the legacy patterns and the two deleted themes —
+   * resolves to the Marigold Bridge fallback so a stale settings file cannot break boot or
+   * resurrect a deleted option.
+   */
+  @Test
+  void fromDashboardNameMigratesRemovedOptionsToTheDefault() {
+    for (LEDPattern pattern : LEDPattern.values()) {
+      assertSame(pattern, LEDPattern.fromDashboardName(pattern.getDashboardName(), null));
+    }
+    String[] removed = {
+      "Solid", "Rainbow", "Chase", "Breathe", "Papel Fiesta", "Candle Memory", "Not A Pattern", null
+    };
+    for (String saved : removed) {
+      assertSame(
+          LEDPattern.MARIGOLD_BRIDGE,
+          LEDPattern.fromDashboardName(saved, LEDPattern.MARIGOLD_BRIDGE),
+          "saved value \"" + saved + "\" must fall back to the default");
+    }
+    // Exact match only: a case variant of a real name is an unknown name.
+    assertSame(
+        LEDPattern.MARIGOLD_BRIDGE,
+        LEDPattern.fromDashboardName("marigold bridge", LEDPattern.MARIGOLD_BRIDGE));
   }
 
   @Test

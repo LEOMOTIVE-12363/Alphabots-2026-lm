@@ -14,11 +14,13 @@ import org.littletonrobotics.junction.Logger;
 import org.littletonrobotics.junction.networktables.LoggedDashboardChooser;
 
 /**
- * Addressable LED strip. The Elastic "LED Pattern" chooser picks between the five legacy effects
- * and the five Day of the Dead themes; theme patterns render the theme gradient with the
- * independently chosen "LED Idle Effect". The selected style is independent of enable state and
- * mechanism activity. Global brightness comes from the "/Tuning/LED Brightness (%)" input. Pattern,
- * idle effect, and brightness are power-cycle persistent like the other Elastic settings.
+ * Addressable LED strip. The Elastic "LED Pattern" chooser picks between Off and the three Day of
+ * the Dead themes (the legacy Solid/Rainbow/Chase/Breathe patterns and two themes were removed on
+ * 2026-10-26, user decision); theme patterns render the theme gradient with the independently
+ * chosen "LED Idle Effect", and Off renders black. The selected style is independent of enable
+ * state and mechanism activity. Global brightness comes from the "/Tuning/LED Brightness (%)"
+ * input. Pattern, idle effect, and brightness are power-cycle persistent like the other Elastic
+ * settings.
  *
  * <p>All timing derives from the AdvantageKit log timestamp so replays reproduce the exact output;
  * in replay mode nothing is written to NetworkTables or the settings file.
@@ -31,8 +33,6 @@ public class LED extends SubsystemBase {
 
   /** Settings-store key of the idle-effect chooser; NT entry "/SmartDashboard/LED Idle Effect". */
   public static final String EFFECT_SETTING_KEY = "/SmartDashboard/LED Idle Effect";
-
-  private static final int MAX_VALUE = 255;
 
   /**
    * Loops after boot during which no idle-effect recommendation is written: the restore writes to
@@ -98,8 +98,11 @@ public class LED extends SubsystemBase {
   /**
    * Re-selects the pattern saved by the previous run, exactly as if the operator had picked it on
    * the dashboard (writes the chooser's "selected" NT entry, which Elastic drives the same way),
-   * and establishes the baseline used to spot operator theme changes later. An unknown saved name
-   * (e.g. left over from an older build) is ignored, keeping the Marigold Bridge default.
+   * and establishes the baseline used to spot operator theme changes later. A saved name that no
+   * longer resolves — Off-persisted settings stay Off, kept themes restore as themselves, but names
+   * left over from older builds (the removed legacy patterns and themes) — is ignored with a
+   * warning, keeping the Marigold Bridge default; the next periodic persists that effective value,
+   * so a restart can never resurrect a deleted option.
    */
   private void restoreSavedPattern() {
     if (Logger.hasReplaySource()) {
@@ -112,12 +115,11 @@ public class LED extends SubsystemBase {
     if (saved == null) {
       return;
     }
-    for (LEDPattern pattern : LEDPattern.values()) {
-      if (pattern.getDashboardName().equals(saved)) {
-        selectOnChooser(PATTERN_SETTING_KEY, saved);
-        lastPattern = pattern;
-        return;
-      }
+    LEDPattern restored = LEDPattern.fromDashboardName(saved, null);
+    if (restored != null) {
+      selectOnChooser(PATTERN_SETTING_KEY, saved);
+      lastPattern = restored;
+      return;
     }
     System.err.println("[LED] Unknown saved pattern \"" + saved + "\"; keeping the default");
   }
@@ -152,19 +154,15 @@ public class LED extends SubsystemBase {
   }
 
   /**
-   * Advances through the five themes from the chooser's current value; legacy patterns start at
-   * Marigold.
+   * Advances through the three themes from the chooser's current value; Off (the only non-theme
+   * pattern) starts at Marigold.
    */
   public void cycleTheme() {
     if (Logger.hasReplaySource()) {
       return;
     }
     LEDPattern[] cycle = {
-      LEDPattern.MARIGOLD_BRIDGE,
-      LEDPattern.FESTIVAL_NIGHT,
-      LEDPattern.PAPEL_FIESTA,
-      LEDPattern.ALEBRIJE_GLOW,
-      LEDPattern.CANDLE_MEMORY
+      LEDPattern.MARIGOLD_BRIDGE, LEDPattern.FESTIVAL_NIGHT, LEDPattern.ALEBRIJE_GLOW
     };
     LEDPattern current = patternChooser.get();
     int next = 0;
@@ -178,8 +176,8 @@ public class LED extends SubsystemBase {
   }
 
   /**
-   * Advances the idle effect only while a theme is selected; legacy patterns leave both choosers
-   * alone.
+   * Advances the idle effect only while a theme is selected; Off leaves both choosers alone, so
+   * pressing Start with the strip off never lights a pixel and never changes anything.
    */
   public void cycleIdleEffect() {
     if (Logger.hasReplaySource()) {
@@ -233,7 +231,10 @@ public class LED extends SubsystemBase {
     if (pattern.theme().isPresent()) {
       renderThemePattern(pattern.theme().get(), effect, now, brightnessPercent);
     } else {
-      renderLegacyPattern(pattern, now, brightnessPercent);
+      // Off is the only non-theme pattern; the legacy Solid/Rainbow/Chase/Breathe renderers were
+      // removed with their menu entries (2026-10-26).
+      fillBlack(buffer);
+      fillBlack(onboardBuffer);
     }
     // Onboard first so the driver plans with the current thumbnail when it sends the external
     // frame in the same call chain.
@@ -376,109 +377,13 @@ public class LED extends SubsystemBase {
   }
 
   /**
-   * The five legacy effects with their original per-pattern math (including brightness applied to
-   * the HSV value channel); they use their own pattern math rather than theme sections. Rendered
-   * into the external buffer and the onboard thumbnail with the same math — the onboard shows the
-   * same pattern at 8-pixel granularity.
+   * Writes black to every pixel. Package-private static so tests pin the Off path (external strip,
+   * onboard thumbnail, and preview alike) directly.
    */
-  private void renderLegacyPattern(LEDPattern pattern, double now, double brightnessPercent) {
-    renderLegacyInto(buffer, pattern, now, brightnessPercent);
-    renderLegacyInto(onboardBuffer, pattern, now, brightnessPercent);
-  }
-
-  /**
-   * Package-private static sibling of {@link #renderLegacyPattern} for direct testing. The Chase
-   * lap is defined by the configured external strip length (see {@link #renderLegacyInto(
-   * AddressableLEDBuffer, LEDPattern, double, double, int)}), so a short target such as the onboard
-   * thumbnail shares the external cycle instead of running its own much faster one.
-   */
-  static void renderLegacyInto(
-      AddressableLEDBuffer target, LEDPattern pattern, double now, double brightnessPercent) {
-    renderLegacyInto(target, pattern, now, brightnessPercent, LEDConstants.LENGTH_PIXELS);
-  }
-
-  /**
-   * The legacy effects with their original per-pattern math. For Chase, one lap spans {@code
-   * referenceLengthPixels + tail} and every target — the external strip AND the onboard thumbnail —
-   * advances through that same lap with the same head position (third acceptance round, 2026-10-25:
-   * per-target laps made the 8-px thumbnail cycle 14.7× faster than the 200-px strip, breaking the
-   * shared-phase thumbnail contract). A target whose length equals the reference (the external
-   * strip render, and the Elastic preview's full-length legacy buffer) keeps the exact original
-   * per-pixel math; any other length (the thumbnail) renders at normalized u positions mapped onto
-   * the reference lap, matching how the theme thumbnail samples the shared render — so the onboard
-   * direction never depends on the external wiring either.
-   */
-  static void renderLegacyInto(
-      AddressableLEDBuffer target,
-      LEDPattern pattern,
-      double now,
-      double brightnessPercent,
-      int referenceLengthPixels) {
-    double scale = brightnessPercent / 100.0 * MAX_VALUE;
-    int length = target.getLength();
-    int referenceLength = Math.max(referenceLengthPixels, 1);
-
-    switch (pattern) {
-      case OFF -> {
-        for (int i = 0; i < length; i++) {
-          target.setHSV(i, 0, 0, 0);
-        }
-      }
-      case SOLID -> {
-        for (int i = 0; i < length; i++) {
-          target.setHSV(i, LEDConstants.SOLID_HUE, MAX_VALUE, (int) scale);
-        }
-      }
-      case RAINBOW -> {
-        int offset = (int) Math.round(now / LEDConstants.RAINBOW_FULL_CYCLE_SEC * 180.0) % 180;
-        for (int i = 0; i < length; i++) {
-          target.setHSV(i, (i * 180 / length + offset) % 180, MAX_VALUE, (int) scale);
-        }
-      }
-      case CHASE -> {
-        // Comet with CHASE_TAIL_PIXELS fade trailing its head, wrapping around the reference lap.
-        double lap = referenceLength + LEDConstants.CHASE_TAIL_PIXELS;
-        double head = (now * LEDConstants.CHASE_SPEED_PIXELS_PER_SEC) % lap;
-        boolean isReferenceRender = length == referenceLength;
-        for (int i = 0; i < length; i++) {
-          // Thumbnail u=1 must land on the external strip's actual final pixel
-          // (referenceLength - 1): u × referenceLength pointed one pixel past the end, so the
-          // thumbnail's last LED lit exactly when the strip had gone dark (fourth acceptance
-          // round, 2026-10-26).
-          double position =
-              isReferenceRender
-                  ? i
-                  : normalizedThumbnailPosition(i, length) * (referenceLength - 1);
-          double distanceBehindHead = head - position;
-          int value = 0;
-          if (distanceBehindHead >= 0 && distanceBehindHead < LEDConstants.CHASE_TAIL_PIXELS) {
-            value = (int) (scale * (1.0 - distanceBehindHead / LEDConstants.CHASE_TAIL_PIXELS));
-          }
-          target.setHSV(i, LEDConstants.CHASE_HUE, MAX_VALUE, value);
-        }
-      }
-      case BREATHE -> {
-        int value =
-            (int)
-                (scale
-                    * (0.5 - 0.5 * Math.cos(2 * Math.PI * now / LEDConstants.BREATHE_PERIOD_SEC)));
-        for (int i = 0; i < length; i++) {
-          target.setHSV(i, LEDConstants.BREATHE_HUE, MAX_VALUE, value);
-        }
-      }
-      default -> {
-        // Theme patterns never reach this method.
-      }
+  static void fillBlack(AddressableLEDBuffer target) {
+    for (int i = 0; i < target.getLength(); i++) {
+      target.setRGB(i, 0, 0, 0);
     }
-  }
-
-  /**
-   * Normalized [0, 1] position of pixel {@code i} in a non-reference-length target — the same
-   * section-u convention the theme thumbnail uses ({@link LEDSection#uForPixel}: first pixel u=0,
-   * last u=1).
-   */
-  private static double normalizedThumbnailPosition(int i, int length) {
-    return length <= 1 ? 0.0 : (double) i / (length - 1);
   }
 
   /**

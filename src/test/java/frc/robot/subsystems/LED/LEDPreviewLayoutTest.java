@@ -26,9 +26,7 @@ class LEDPreviewLayoutTest {
       List.of(
           new ThemeCard(LEDTheme.MARIGOLD_BRIDGE, 0.0),
           new ThemeCard(LEDTheme.FESTIVAL_NIGHT, 256.0),
-          new ThemeCard(LEDTheme.PAPEL_FIESTA, 512.0),
-          new ThemeCard(LEDTheme.ALEBRIJE_GLOW, 768.0),
-          new ThemeCard(LEDTheme.CANDLE_MEMORY, 1024.0));
+          new ThemeCard(LEDTheme.ALEBRIJE_GLOW, 512.0));
 
   private static JsonNode root;
 
@@ -59,18 +57,18 @@ class LEDPreviewLayoutTest {
   }
 
   @Test
-  void previewTabHasExactlyTwoExistingChoosersAndSixUniqueColorViews() {
+  void previewTabHasExactlyTwoExistingChoosersAndFourUniqueColorViews() {
     List<JsonNode> widgets = containers(tab("LED Preview"));
     List<JsonNode> choosers = widgetsOfType(widgets, "ComboBox Chooser");
     List<JsonNode> colorViews = widgetsOfType(widgets, "Multi Color View");
 
     assertAll(
-        () -> assertEquals(8, widgets.size()),
+        () -> assertEquals(6, widgets.size()),
         () -> assertEquals(2, choosers.size()),
-        () -> assertEquals(6, colorViews.size()),
+        () -> assertEquals(4, colorViews.size()),
         () ->
             assertEquals(
-                8,
+                6,
                 widgets.stream().map(w -> w.path("title").asText()).distinct().count(),
                 "every preview widget must have a unique title"));
     assertEquals(Set.of(PATTERN_TOPIC, EFFECT_TOPIC), topics(choosers));
@@ -79,7 +77,7 @@ class LEDPreviewLayoutTest {
     }
 
     Set<String> actualTopics = topics(colorViews);
-    assertEquals(6, actualTopics.size(), "preview topics must be unique");
+    assertEquals(4, actualTopics.size(), "preview topics must be unique");
     assertEquals(expectedPreviewTopics(), actualTopics);
   }
 

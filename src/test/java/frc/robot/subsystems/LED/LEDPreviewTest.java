@@ -50,7 +50,7 @@ class LEDPreviewTest {
           pattern
               .theme()
               .map(theme -> themeReference(theme, IdleEffect.COLOR_STEP, CURRENT_SAMPLES, NOW_SEC))
-              .orElseGet(() -> legacyReference(pattern, CURRENT_SAMPLES, NOW_SEC));
+              .orElseGet(() -> allBlack(CURRENT_SAMPLES));
       assertArrayEquals(expected, actual);
       assertEquals(CURRENT_SAMPLES, actual.length);
       assertHexFormat(actual);
@@ -61,9 +61,7 @@ class LEDPreviewTest {
     return Stream.of(
         Arguments.of(LEDPattern.MARIGOLD_BRIDGE, IdleEffect.SLOW_FLOW),
         Arguments.of(LEDPattern.FESTIVAL_NIGHT, IdleEffect.BREATHE),
-        Arguments.of(LEDPattern.PAPEL_FIESTA, IdleEffect.CHASE),
-        Arguments.of(LEDPattern.ALEBRIJE_GLOW, IdleEffect.SLOW_FLOW),
-        Arguments.of(LEDPattern.CANDLE_MEMORY, IdleEffect.STATIC));
+        Arguments.of(LEDPattern.ALEBRIJE_GLOW, IdleEffect.SLOW_FLOW));
   }
 
   @ParameterizedTest(name = "{0} fixed card uses {1}")
@@ -83,15 +81,9 @@ class LEDPreviewTest {
   static Stream<Arguments> currentTimeBehavior() {
     return Stream.of(
         Arguments.of(LEDPattern.OFF, IdleEffect.STATIC, false),
-        Arguments.of(LEDPattern.SOLID, IdleEffect.STATIC, false),
-        Arguments.of(LEDPattern.RAINBOW, IdleEffect.STATIC, true),
-        Arguments.of(LEDPattern.CHASE, IdleEffect.STATIC, true),
-        Arguments.of(LEDPattern.BREATHE, IdleEffect.STATIC, true),
         Arguments.of(LEDPattern.MARIGOLD_BRIDGE, IdleEffect.SLOW_FLOW, true),
         Arguments.of(LEDPattern.FESTIVAL_NIGHT, IdleEffect.BREATHE, true),
-        Arguments.of(LEDPattern.PAPEL_FIESTA, IdleEffect.CHASE, true),
-        Arguments.of(LEDPattern.ALEBRIJE_GLOW, IdleEffect.SLOW_FLOW, true),
-        Arguments.of(LEDPattern.CANDLE_MEMORY, IdleEffect.STATIC, false));
+        Arguments.of(LEDPattern.ALEBRIJE_GLOW, IdleEffect.SLOW_FLOW, true));
   }
 
   @ParameterizedTest(name = "{0} time-varying={2}")
@@ -118,7 +110,7 @@ class LEDPreviewTest {
   }
 
   @Test
-  void publishesOnlyTheCurrentAndFiveNamedThemeTopics() {
+  void publishesOnlyTheCurrentAndThreeNamedThemeTopics() {
     try (Harness harness = new Harness()) {
       harness.preview.update(LEDPattern.MARIGOLD_BRIDGE, IdleEffect.SLOW_FLOW, NOW_SEC);
 
@@ -127,16 +119,14 @@ class LEDPreviewTest {
               CURRENT,
               themeTopic(LEDTheme.MARIGOLD_BRIDGE),
               themeTopic(LEDTheme.FESTIVAL_NIGHT),
-              themeTopic(LEDTheme.PAPEL_FIESTA),
-              themeTopic(LEDTheme.ALEBRIJE_GLOW),
-              themeTopic(LEDTheme.CANDLE_MEMORY));
+              themeTopic(LEDTheme.ALEBRIJE_GLOW));
       Set<String> actualTopics =
           Arrays.stream(harness.nt.getTopics())
               .map(topic -> topic.getName())
               .collect(Collectors.toSet());
       assertEquals(expectedTopics, actualTopics);
-      assertEquals(6, harness.sinkCreations);
-      assertEquals(6, harness.totalWrites());
+      assertEquals(4, harness.sinkCreations);
+      assertEquals(4, harness.totalWrites());
     }
   }
 
@@ -182,51 +172,30 @@ class LEDPreviewTest {
   }
 
   @Test
-  void scheduledPublishingIsBoundedAndSuppressesUnchangedStaticCards() {
+  void scheduledPublishingIsBoundedAndSuppressesUnchangedStaticFrames() {
     try (Harness harness = new Harness()) {
-      harness.preview.update(LEDPattern.RAINBOW, IdleEffect.STATIC, 1.0);
+      // Off is the one static current selection (all black); all three theme cards animate with
+      // their recommended effects, so on the 100 ms boundary only the changed frames publish.
+      harness.preview.update(LEDPattern.OFF, IdleEffect.STATIC, 1.0);
       Map<String, String[]> initialStorage = harness.allStorageByTopic();
 
-      harness.preview.update(LEDPattern.RAINBOW, IdleEffect.STATIC, 1.09);
-      harness.preview.update(LEDPattern.RAINBOW, IdleEffect.STATIC, 1.099);
-      assertEquals(6, harness.totalWrites(), "nothing may publish before the 100 ms boundary");
+      harness.preview.update(LEDPattern.OFF, IdleEffect.STATIC, 1.09);
+      harness.preview.update(LEDPattern.OFF, IdleEffect.STATIC, 1.099);
+      assertEquals(4, harness.totalWrites(), "nothing may publish before the 100 ms boundary");
 
-      harness.preview.update(LEDPattern.RAINBOW, IdleEffect.STATIC, 1.1);
-      assertEquals(2, harness.writeCount(CURRENT));
+      harness.preview.update(LEDPattern.OFF, IdleEffect.STATIC, 1.1);
+      assertEquals(
+          1, harness.writeCount(CURRENT), "the unchanged black current frame must not republish");
       for (LEDTheme theme : LEDTheme.values()) {
-        int expectedWrites = theme == LEDTheme.CANDLE_MEMORY ? 1 : 2;
-        assertEquals(expectedWrites, harness.writeCount(themeTopic(theme)), theme.toString());
+        assertEquals(2, harness.writeCount(themeTopic(theme)), theme.toString());
       }
-      assertEquals(11, harness.totalWrites(), "only the five changed frames may publish");
+      assertEquals(7, harness.totalWrites(), "only the three changed card frames may publish");
       for (Map.Entry<String, String[]> entry : initialStorage.entrySet()) {
         assertSame(entry.getValue(), harness.lastWrite(entry.getKey()).storage, entry.getKey());
       }
 
-      harness.preview.update(LEDPattern.RAINBOW, IdleEffect.STATIC, 1.1001);
-      assertEquals(11, harness.totalWrites());
-    }
-  }
-
-  @Test
-  void legacyRainbowAndChaseRenderAtFullLengthBeforeEndpointDownsampling() {
-    for (LEDPattern pattern : new LEDPattern[] {LEDPattern.RAINBOW, LEDPattern.CHASE}) {
-      try (Harness harness = new Harness()) {
-        harness.preview.update(pattern, IdleEffect.STATIC, NOW_SEC);
-
-        String[] expected = legacyReference(pattern, CURRENT_SAMPLES, NOW_SEC);
-        assertArrayEquals(expected, harness.value(CURRENT), pattern.toString());
-        assertFalse(
-            Arrays.equals(expected, legacyDirectReference(pattern, CURRENT_SAMPLES, NOW_SEC)),
-            "the fixture must distinguish full-length timing from a direct short render");
-
-        AddressableLEDBuffer full = legacyFullBuffer(pattern, NOW_SEC);
-        String[] actual = harness.value(CURRENT);
-        assertEquals(hex(full, 0), actual[0], "the first endpoint must be preserved");
-        assertEquals(
-            hex(full, full.getLength() - 1),
-            actual[CURRENT_SAMPLES - 1],
-            "the last endpoint must be preserved");
-      }
+      harness.preview.update(LEDPattern.OFF, IdleEffect.STATIC, 1.1001);
+      assertEquals(7, harness.totalWrites());
     }
   }
 
@@ -269,11 +238,10 @@ class LEDPreviewTest {
     DriverStationSim.notifyNewData();
     assertTrue(DriverStation.isDisabled());
     try (Harness harness = new Harness()) {
-      harness.preview.update(LEDPattern.SOLID, IdleEffect.STATIC, NOW_SEC);
+      harness.preview.update(LEDPattern.OFF, IdleEffect.STATIC, NOW_SEC);
 
-      assertArrayEquals(
-          legacyReference(LEDPattern.SOLID, CURRENT_SAMPLES, NOW_SEC), harness.value(CURRENT));
-      assertEquals(6, harness.totalWrites());
+      assertArrayEquals(allBlack(CURRENT_SAMPLES), harness.value(CURRENT));
+      assertEquals(4, harness.totalWrites());
     } finally {
       DriverStationSim.setEnabled(false);
       DriverStationSim.setDsAttached(false);
@@ -318,12 +286,17 @@ class LEDPreviewTest {
     BallFlowTracker.resetForTest();
     BallFlowTracker.setClockForTest(() -> NOW_SEC);
     try (Harness harness = new Harness()) {
-      LED.renderLegacyInto(real, LEDPattern.RAINBOW, 0.41, 63.0);
-      LED.renderLegacyInto(onboard, LEDPattern.CHASE, 0.41, 63.0);
+      for (int i = 0; i < real.getLength(); i++) {
+        real.setRGB(i, (i * 3) % 256, 17, 200); // sentinel fill, independent of any renderer
+      }
+      LED.fillBlack(onboard);
+      for (int i = 0; i < onboard.getLength(); i += 2) {
+        onboard.setRGB(i, 90, 180, 12); // sentinel onboard fill
+      }
       int[] sentinelReal = packed(real);
       int[] sentinelOnboard = packed(onboard);
       brightness.setDouble(23.0);
-      pattern.setString("Candle Memory");
+      pattern.setString("Alebrije Glow");
       effect.setString("Chase");
       BallFlowTracker.report(FlowKind.LOCAL_REVERSE);
       assertEquals(FlowState.IDLE, BallFlowTracker.effectiveState());
@@ -338,7 +311,7 @@ class LEDPreviewTest {
       assertSame(originalPreviousTheme, field(led, "previousTheme"));
       assertEquals(originalTransitionStart, (double) field(led, "themeTransitionStartSec"));
       assertEquals(23.0, brightness.getDouble(0.0));
-      assertEquals("Candle Memory", pattern.getString(""));
+      assertEquals("Alebrije Glow", pattern.getString(""));
       assertEquals("Chase", effect.getString(""));
       assertEquals(FlowState.IDLE, BallFlowTracker.effectiveState());
       assertEquals("local reverse only", BallFlowTracker.diagnostic());
@@ -368,27 +341,10 @@ class LEDPreviewTest {
     return hex(buffer);
   }
 
-  private static String[] legacyReference(LEDPattern pattern, int samples, double nowSec) {
-    AddressableLEDBuffer full = legacyFullBuffer(pattern, nowSec);
+  private static String[] allBlack(int samples) {
     String[] result = new String[samples];
-    for (int i = 0; i < samples; i++) {
-      int source =
-          samples == 1 ? 0 : (int) Math.round((double) i * (full.getLength() - 1) / (samples - 1));
-      result[i] = hex(full, source);
-    }
+    Arrays.fill(result, "#000000");
     return result;
-  }
-
-  private static String[] legacyDirectReference(LEDPattern pattern, int samples, double nowSec) {
-    AddressableLEDBuffer direct = new AddressableLEDBuffer(samples);
-    LED.renderLegacyInto(direct, pattern, nowSec, 100.0);
-    return hex(direct);
-  }
-
-  private static AddressableLEDBuffer legacyFullBuffer(LEDPattern pattern, double nowSec) {
-    AddressableLEDBuffer full = new AddressableLEDBuffer(LEDConstants.LENGTH_PIXELS);
-    LED.renderLegacyInto(full, pattern, nowSec, 100.0);
-    return full;
   }
 
   private static String[] hex(AddressableLEDBuffer buffer) {

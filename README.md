@@ -22,14 +22,14 @@
 - **视觉** — Limelight（MegaTag2）全局位姿估计，融入 swerve 里程计
 - **AdvantageKit 三模式** — REAL / SIM / REPLAY 共用一套代码，日志可确定性回放
 - **maple-sim 桌面仿真** — 2026 REBUILT 场地（含 HUB / Trench 碰撞体）物理仿真
-- **Elastic 自定义仪表盘** — 布局版本化于 `elastic-layout-1025.json`；配套 NetworkTables 调参脚本 `scripts/nt_tune.py`、`scripts/pid_analysis.py`
+- **Elastic 自定义仪表盘** — 布局版本化于 `elastic-layout-1026.json`；配套 NetworkTables 调参脚本 `scripts/nt_tune.py`、`scripts/pid_analysis.py`
 
 ## 分支模型
 
 | 分支 | 内容 |
 |---|---|
 | `main` | 上游 Alphabots 8810 竞赛代码基线，保留本 fork 的 MIT LICENSE、双语 README 与私有配置退跟踪改动：完整自动程序（Choreo 轨迹 + PathPlanner）、视觉、战术程序 |
-| `demo` | **LEOMOTIVE demo 展示线**（本仓库的日常开发线）：移除全部自动程序与视觉，纯手动驾驶；Elastic 数值输入框直控 Drum 转速 / Hood 俯仰，并新增 demo 调参页；可寻址 LED 灯带（亡灵节五套主题配色；`LED Pattern` / `LED Idle Effect` / `LED Brightness (%)` 由 Elastic 选择并断电持久化，Enable、Disable、空闲、吸球、射球、吐球时都保持同一所选样式，Slow Flow / Chase / Breathe 等用户所选动画仍随时间播放；`Follow Ball Flow` 开关已移除；灯带分段与动画参数待实灯核验；CANdle 已选定为默认驱动，PWM 保留为编译期备用；改 `LEDConstants.HARDWARE` 一个常量即可切换，硬件安装参数与实灯表现仍待核验） |
+| `demo` | **LEOMOTIVE demo 展示线**（本仓库的日常开发线）：移除全部自动程序与视觉，纯手动驾驶；Elastic 数值输入框直控 Drum 转速 / Hood 俯仰，并新增 demo 调参页；可寻址 LED 灯带（亡灵节三套主题配色＋Off——2026-10-26 起菜单精简为这四项，纯色/彩虹/追逐/呼吸独立模式与 Papel Fiesta / Candle Memory 主题已删，旧保存值安全回退默认；`LED Pattern` / `LED Idle Effect` / `LED Brightness (%)` 由 Elastic 选择并断电持久化，Enable、Disable、空闲、吸球、射球、吐球时都保持同一所选样式，Slow Flow / Chase / Breathe 等用户所选动画仍随时间播放；`Follow Ball Flow` 开关已移除；灯带分段与动画参数待实灯核验；CANdle 已选定为默认驱动，PWM 保留为编译期备用；改 `LEDConstants.HARDWARE` 一个常量即可切换，硬件安装参数与实灯表现仍待核验） |
 
 - demo 展示线的功能改动**永不合入 `main`**；每个任务一个独立 PR，base 为 `demo`，自检通过后即合入。仓库共用的中英 README 同步维护：从 `demo` 发起文档改动，再以独立 PR 将相同文案同步至 `main`。
 - 查看 `demo` 相对 `main` 的全部差异，请使用 GitHub Compare：[compare/main...demo](https://github.com/LEOMOTIVE-12363/Alphabots-2026-lm/compare/main...demo)（原先长期保持 open 的总览 PR #2 已于 2026-10-23 关闭，无须常驻 open PR）。
@@ -50,7 +50,7 @@ Driver Station 编号 **1 优先于 0**，优先级同时适用于驾驶和所�
 | 循环 LED 主题 / 待机动画 | Back / Start | 无 LED 切换 |
 | 重置仿真场地（实车无效） | 无 | Start |
 
-1 号 Back 按 Marigold Bridge → Festival Night → Papel Fiesta → Alebrije Glow → Candle Memory 循环五套主题，Start 按 Static → Breathe → Slow Flow → Chase → Color Step 循环五种待机动画；每次按下只前进一项。两者直接操作现有 `LED Pattern` / `LED Idle Effect` chooser，手柄或 Elastic 任一端改变后，另一端同步显示实际选择，并沿用现有断电持久化。切换主题仍自动预选推荐动画，之后可用 Start 或 Elastic 覆盖；基础灯效下 Back 进入 Marigold Bridge，Start 不改变任何选择。0 号 Back 未绑定，0 号 Start 仍仅用于仿真场地重置。
+1 号 Back 按 Marigold Bridge → Festival Night → Alebrije Glow 循环三套主题（Off 仅在面板选择），Start 按 Static → Breathe → Slow Flow → Chase → Color Step 循环五种待机动画；每次按下只前进一项。两者直接操作现有 `LED Pattern` / `LED Idle Effect` chooser，手柄或 Elastic 任一端改变后，另一端同步显示实际选择，并沿用现有断电持久化。切换主题仍自动预选推荐动画，之后可用 Start 或 Elastic 覆盖；Off 下 Back 进入 Marigold Bridge，Start 无任何效果、不会点亮灯带。0 号 Back 未绑定，0 号 Start 仍仅用于仿真场地重置。
 
 LT 同时展开 intake 并吸球，松开后停止吸球但不自动收回。方向键左执行向内收回及机械归零校准。LB/RT 反转为点动式：反转输出按当前控制手柄的按住状态实时重算——控制手柄按住 LB 时吸球滚轮、Indexer、Feeder 反转（RT 仅 Indexer/Feeder），松开、断连、失去优先权且接管手柄未按住同一键、或机器人禁用时归零；反转不占用子系统，因此与射球同时进行时反转写入会被射球循环覆盖（沿用原有行为，本轮有意未改）。
 
@@ -69,9 +69,9 @@ LT 同时展开 intake 并吸球，松开后停止吸球但不自动收回。方
 
 ## Elastic LED 预览
 
-`elastic-layout-1025.json` 的 `LED Preview` 页提供独立于实灯输出的配色与动画预览。使用时必须正在运行机器人代码或桌面仿真，并将 Elastic 连接到该进程的 NetworkTables；仅打开布局不会产生预览数据。
+`elastic-layout-1026.json` 的 `LED Preview` 页提供独立于实灯输出的配色与动画预览。使用时必须正在运行机器人代码或桌面仿真，并将 Elastic 连接到该进程的 NetworkTables；仅打开布局不会产生预览数据。
 
-- 顶部 `LED Pattern` 与 `LED Idle Effect` 沿用现有设置键。大的 `Current Selection` 卡片预览当前 Pattern（主题 Pattern 使用当前 Idle Effect）；下方五张固定卡片分别展示 Marigold Bridge / Slow Flow、Festival Night / Breathe、Papel Fiesta / Chase、Alebrije Glow / Slow Flow、Candle Memory / Static 的主题与推荐效果。
+- 顶部 `LED Pattern` 与 `LED Idle Effect` 沿用现有设置键。大的 `Current Selection` 卡片预览当前 Pattern（主题 Pattern 使用当前 Idle Effect）；下方三张固定卡片分别展示 Marigold Bridge / Slow Flow、Festival Night / Breathe、Alebrije Glow / Slow Flow 的主题与推荐效果。
 - 所有卡片按固定参考亮度生成，不读取或显示实灯状态或实际亮度；`LED Brightness (%)` 不缩放预览，吸球、射球、吐球等机制动作也不会打断或替换预览。
 - 预览用于比较主题与效果，不代表实灯颜色或亮度；屏幕颜色不能用来核验实灯色序、亮度、供电或分段。机器人 `Disabled` 时预览仍可用；`REPLAY` 不发布这些预览话题，因此回放不会填充此页。
 
@@ -93,7 +93,7 @@ LT 同时展开 intake 并吸球，松开后停止吸球但不自动收回。方
 - `frc.robot.subsystems` — 单例模式（每个子系统 `public static final mInstance`），`X.java` + `XConstants.java` 成对（CAN ID、增益、仿真配置）。
 - `frc.robot.commands` — 每个命令独立目录，各带 `*Constants.java`。
 - 三种运行模式由 `Constants.currentMode`（REAL / SIM / REPLAY）切换，各子系统按模式选择 IO 实现。
-- `elastic-layout-1025.json` — Elastic 仪表盘布局，与代码内 NetworkTables 接口同步维护。
+- `elastic-layout-1026.json` — Elastic 仪表盘布局，与代码内 NetworkTables 接口同步维护。
 
 ## 开发流程与决策记录
 

@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
  * on a fixed non-reversed section, so onboard 0→7 is always intake→shooter regardless of how the
  * external strip is wired — reversed runs, split side panels and decoration sections can never
  * change the onboard direction or mix decoration into it. These tests pin that contract at the
- * render seam ({@link LED#renderThemeInto} / {@link LED#renderLegacyInto}).
+ * render seam ({@link LED#renderThemeInto} / {@link LED#fillBlack}).
  */
 class LEDOnboardThumbnailTest {
   private static final int THUMBNAIL_PIXELS = LEDConstants.ONBOARD_THUMBNAIL_PIXELS;
@@ -108,10 +108,16 @@ class LEDOnboardThumbnailTest {
       assertEquals(0, dark.getBlue(k), "brightness 0 must dark the thumbnail");
     }
 
-    AddressableLEDBuffer legacyOff = new AddressableLEDBuffer(THUMBNAIL_PIXELS);
-    LED.renderLegacyInto(legacyOff, LEDPattern.OFF, NOW_SEC, 100.0);
+    // Off fills the thumbnail black through the same path periodic uses.
+    AddressableLEDBuffer off = new AddressableLEDBuffer(THUMBNAIL_PIXELS);
     for (int k = 0; k < THUMBNAIL_PIXELS; k++) {
-      assertEquals(0, legacyOff.getRed(k), "Off must clear the thumbnail");
+      off.setRGB(k, 200, 30, 30); // lit sentinel: Off must clear it, not skip it
+    }
+    LED.fillBlack(off);
+    for (int k = 0; k < THUMBNAIL_PIXELS; k++) {
+      assertEquals(0, off.getRed(k), "Off must clear the thumbnail");
+      assertEquals(0, off.getGreen(k), "Off must clear the thumbnail");
+      assertEquals(0, off.getBlue(k), "Off must clear the thumbnail");
     }
     assertNotEquals(0, zeroed.getRed(0), "sanity: 100% render was not dark");
   }
@@ -128,21 +134,6 @@ class LEDOnboardThumbnailTest {
       assertEquals(IdleEffects.to255(expected.red), half.getRed(k), "red at " + k);
       assertEquals(IdleEffects.to255(expected.green), half.getGreen(k), "green at " + k);
       assertEquals(IdleEffects.to255(expected.blue), half.getBlue(k), "blue at " + k);
-    }
-  }
-
-  @Test
-  void legacyThumbnailUsesTheSamePatternMath() {
-    AddressableLEDBuffer thumbnail = new AddressableLEDBuffer(THUMBNAIL_PIXELS);
-    double brightness = 40.0;
-    LED.renderLegacyInto(thumbnail, LEDPattern.SOLID, NOW_SEC, brightness);
-    int expectedValue = (int) (brightness / 100.0 * 255);
-    AddressableLEDBuffer expectedPixel = new AddressableLEDBuffer(1);
-    expectedPixel.setHSV(0, LEDConstants.SOLID_HUE, 255, expectedValue);
-    for (int k = 0; k < THUMBNAIL_PIXELS; k++) {
-      assertEquals(expectedPixel.getRed(0), thumbnail.getRed(k), "solid red at " + k);
-      assertEquals(expectedPixel.getGreen(0), thumbnail.getGreen(k), "solid green at " + k);
-      assertEquals(expectedPixel.getBlue(0), thumbnail.getBlue(k), "solid blue at " + k);
     }
   }
 

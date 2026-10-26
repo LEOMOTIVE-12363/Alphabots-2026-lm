@@ -664,40 +664,14 @@
             }
           },
           {
-            "title": "Papel Fiesta — Chase",
+            "title": "Alebrije Glow — Slow Flow",
             "x": 512.0,
             "y": 384.0,
             "width": 256.0,
             "height": 128.0,
             "type": "Multi Color View",
             "properties": {
-              "topic": "/SmartDashboard/LED Preview/Papel Fiesta",
-              "period": 0.1,
-              "data_type": "string[]"
-            }
-          },
-          {
-            "title": "Alebrije Glow — Slow Flow",
-            "x": 768.0,
-            "y": 384.0,
-            "width": 256.0,
-            "height": 128.0,
-            "type": "Multi Color View",
-            "properties": {
               "topic": "/SmartDashboard/LED Preview/Alebrije Glow",
-              "period": 0.1,
-              "data_type": "string[]"
-            }
-          },
-          {
-            "title": "Candle Memory — Static",
-            "x": 1024.0,
-            "y": 384.0,
-            "width": 256.0,
-            "height": 128.0,
-            "type": "Multi Color View",
-            "properties": {
-              "topic": "/SmartDashboard/LED Preview/Candle Memory",
               "period": 0.1,
               "data_type": "string[]"
             }
