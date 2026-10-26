@@ -56,7 +56,7 @@ LT 同时展开 intake 并吸球，松开后停止吸球但不自动收回。方
 
 ## 演示面板与立即送料
 
-在机器人已使能且按键来源手柄拥有控制权时，按住既有射球键会立即送料：1 号/0 号 RB 的 `Shooting(false)`（普通速度模式）、0 号 A 的 `Shooting(true)`（Indexer 与 Feeder 保持 50 A 电流模式）以及 0 号 X 的 Manual，都在命令第一次 `execute` 就按各自原目标驱动 Indexer 与 Feeder；Drum 与 Hood 同时仍前往原目标，IntakeRoller 保持原运行逻辑。就绪许可只保留 `Flywheel Speed Limit (%) > 0` 这一项：0% 停止送料，调回任意正值的当拍恢复；Drum 转速未到或掉速、Hood 未到或偏离、目标中途改变以及 readiness debounce 都不再暂停、延迟或许可送料。这些射球路径不读取视觉、AprilTag、位姿或瞄准数据。松键、手柄断连、失去控制权、命令打断或机器人禁用仍会停止对应命令并停料。
+在机器人已使能且按键来源手柄拥有控制权时，按住既有射球键会立即送料：1 号/0 号 RB 的 `Shooting(false)`（普通速度模式）、0 号 A 的 `Shooting(true)`（Indexer 与 Feeder 保持 50 A 电流模式）以及 0 号 X 的 Manual，都在命令第一次 `execute` 就按各自原目标驱动 Indexer 与 Feeder；Drum 与 Hood 同时仍前往原目标，IntakeRoller 保持原运行逻辑。就绪许可只保留 `Flywheel Speed Limit (%) > 0` 这一项：0% 停止送料，调回任意正值的当拍恢复；Drum 转速未到或掉速、Hood 未到或偏离、目标中途改变以及 readiness debounce 都不再暂停、延迟或许可送料。这些射球路径不读取视觉、AprilTag、位姿或瞄准数据。松键、手柄断连、失去控制权、命令打断或机器人禁用仍会停止对应命令并停料。松键或禁用后，Drum 不再保持驻停转速，而是断电随惯性滑行停转（2026-10-26 起，见 `docs/decisions/0015`）；重新使能不会让 Drum 自行转起，只有重新按住射球键才会再次驱动它，代价是每次新一轮射球都要从静止重新加速。
 
 自动清堵的阈值、确认、反向输出与时长保持不变；0% 暂停和 UNJAM 期间 retract 计时仍冻结。清堵完成后，只要命令仍在运行且飞轮速度上限大于 0%，就立即恢复原送料状态，不再等待转速/Hood 就绪或稳定窗。
 
