@@ -345,6 +345,63 @@ class ShootingMeasurementFaultTest {
   }
 
   @Test
+  void forceFeedTimeoutReleasesAPermanentlyBelowSpeedDrum() throws Exception {
+    // The field failure: the drum can never enter the tolerance (pure-P loop standing error), so
+    // the gate would hold forever. After 3 s of accumulated waiting the volley must force-feed.
+    Shooting s = new Shooting(false);
+    s.initialize();
+    assertTrue(stepUntilFeeding(s, 30), "reached SHOOT");
+
+    // Sustained below-speed measurement at 100%: the gate pauses and the wait accumulates
+    // (~150 loops of 0.02 s); one extra loop margin on both sides of the boundary.
+    for (int i = 0; i < 156; i++) {
+      injectDrumVelocity(DRUM_SAG_ROTPS);
+      step(s);
+      if (i < 150) {
+        assertEquals(0.0, feederSetpoint(), EPS, "gate holds before the timeout, loop " + i);
+      }
+    }
+    assertTrue(isFeeding(), "force-feed after 3 s of accumulated waiting");
+
+    // The latch stays closed: a continuing below-speed measurement no longer pauses the volley.
+    for (int i = 0; i < 10; i++) {
+      injectDrumVelocity(DRUM_SAG_ROTPS);
+      step(s);
+      assertTrue(isFeeding(), "latched force-feed ignores the speed gate, loop " + i);
+    }
+
+    // Release and re-press resets the latch: the same measurement pauses again.
+    s.end(true);
+    s.initialize();
+    injectDrumVelocity(DRUM_SAG_ROTPS);
+    step(s);
+    assertEquals(0.0, feederSetpoint(), EPS, "fresh press re-arms the speed gate");
+    s.end(true);
+  }
+
+  @Test
+  void zeroFlywheelWaitNeverAccumulatesTowardForceFeed() throws Exception {
+    // A 0% limit is the operator deliberately holding the drum stopped: no amount of 0% time may
+    // count toward the force-feed timeout.
+    DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
+    Shooting s = new Shooting(false);
+    s.initialize();
+    for (int i = 0; i < 200; i++) { // 4 s — beyond the 3 s timeout
+      step(s);
+      assertEquals(0.0, feederSetpoint(), EPS, "0% never force-feeds, loop " + i);
+    }
+
+    // Back at 100% with the drum held below speed, the wait starts from zero: still paused.
+    DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+    for (int i = 0; i < 10; i++) {
+      injectDrumVelocity(DRUM_SAG_ROTPS);
+      step(s);
+      assertEquals(0.0, feederSetpoint(), EPS, "0% time did not count, loop " + i);
+    }
+    s.end(true);
+  }
+
+  @Test
   void timerAndDebouncerClocksAdvanceTogetherUnderSimHooks() {
     // Documents the test-clock relationship behind every timing assertion in the shooting tests:
     // Timer (RobotController.getTime) backs Timer.hasElapsed; MathSharedStore.getTimestamp backs
