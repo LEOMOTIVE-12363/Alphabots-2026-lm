@@ -28,6 +28,8 @@ final class LEDPreview {
       new AddressableLEDBuffer(CURRENT_SELECTION_SAMPLES);
   private final AddressableLEDBuffer[] themeBuffers =
       new AddressableLEDBuffer[LEDTheme.values().length];
+  private final AddressableLEDBuffer legacyBuffer =
+      new AddressableLEDBuffer(LEDConstants.LENGTH_PIXELS);
   private final String[] currentOutput = new String[CURRENT_SELECTION_SAMPLES];
   private final String[][] themeOutputs = new String[LEDTheme.values().length][];
   private final int[] currentPacked = new int[CURRENT_SELECTION_SAMPLES];
@@ -104,8 +106,23 @@ final class LEDPreview {
           currentBuffer, CURRENT_SECTIONS, pattern.theme().get()::colorAt, effect, nowSec, 1.0);
       return;
     }
-    // Off is the only non-theme pattern; its preview card is black like the strip itself.
-    LED.fillBlack(currentBuffer);
+
+    LED.renderLegacyInto(legacyBuffer, pattern, nowSec, 100.0);
+    for (int i = 0; i < CURRENT_SELECTION_SAMPLES; i++) {
+      int source =
+          CURRENT_SELECTION_SAMPLES == 1
+              ? 0
+              : (int)
+                  Math.round(
+                      (double) i
+                          * (legacyBuffer.getLength() - 1)
+                          / (CURRENT_SELECTION_SAMPLES - 1));
+      currentBuffer.setRGB(
+          i,
+          legacyBuffer.getRed(source),
+          legacyBuffer.getGreen(source),
+          legacyBuffer.getBlue(source));
+    }
   }
 
   private void ensureSinks() {

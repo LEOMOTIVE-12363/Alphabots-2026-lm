@@ -31,7 +31,18 @@ class LEDChooserTest {
   @Test
   void ledPatternOptionsStartWithOffAndKeepMarigoldBridgeAsDefault() {
     NetworkTableInstance nt = NetworkTableInstance.getDefault();
-    String[] expectedOptions = {"Off", "Marigold Bridge", "Festival Night", "Alebrije Glow"};
+    String[] expectedOptions = {
+      "Off",
+      "Marigold Bridge",
+      "Solid",
+      "Rainbow",
+      "Chase",
+      "Breathe",
+      "Festival Night",
+      "Papel Fiesta",
+      "Alebrije Glow",
+      "Candle Memory"
+    };
 
     assertAll(
         () ->
@@ -47,24 +58,20 @@ class LEDChooserTest {
   }
 
   /**
-   * Boot-restore migration (menu reduced 2026-10-26): kept names resolve to themselves, Off stays
-   * Off, and every name removed from the menu — the legacy patterns and the two deleted themes —
-   * resolves to the Marigold Bridge fallback so a stale settings file cannot break boot or
-   * resurrect a deleted option.
+   * Boot-restore migration seam: every current option resolves to itself, and an unknown or null
+   * saved name (left over from an older build) resolves to the Marigold Bridge fallback so a stale
+   * settings file cannot break boot or resurrect anything.
    */
   @Test
-  void fromDashboardNameMigratesRemovedOptionsToTheDefault() {
+  void fromDashboardNameResolvesEveryOptionAndFallsBackOnUnknown() {
     for (LEDPattern pattern : LEDPattern.values()) {
       assertSame(pattern, LEDPattern.fromDashboardName(pattern.getDashboardName(), null));
     }
-    String[] removed = {
-      "Solid", "Rainbow", "Chase", "Breathe", "Papel Fiesta", "Candle Memory", "Not A Pattern", null
-    };
-    for (String saved : removed) {
+    for (String unknown : new String[] {"Not A Pattern", null}) {
       assertSame(
           LEDPattern.MARIGOLD_BRIDGE,
-          LEDPattern.fromDashboardName(saved, LEDPattern.MARIGOLD_BRIDGE),
-          "saved value \"" + saved + "\" must fall back to the default");
+          LEDPattern.fromDashboardName(unknown, LEDPattern.MARIGOLD_BRIDGE),
+          "saved value \"" + unknown + "\" must fall back to the default");
     }
     // Exact match only: a case variant of a real name is an unknown name.
     assertSame(

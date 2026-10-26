@@ -29,9 +29,12 @@ public final class LEDConstants {
 
   // ---- Strip geometry (shared by both drivers) -----------------------------------------------
 
-  // Total configured strip length is 10.0 m (user decision 2026-10-24). With the current 20 px/m
-  // density, the driver addresses 200 pixels across the full run.
-  public static final double LENGTH_METERS = 10.0;
+  // Total configured strip length is 7.0 m (user-stated actual install, 2026-10-26: "灯带没有接
+  // 10 米，现在应该是接了 7 米"; supersedes the 10.0 m config from 2026-10-24). With the current
+  // 20 px/m density, the driver addresses 140 pixels across the full run — the previous 10.0 m
+  // config rendered 200 px and the tail of one-way gradients landed on LEDs that were never
+  // installed.
+  public static final double LENGTH_METERS = 7.0;
 
   // TODO(strip install): pixel density is NOT confirmed. The listing's "720 LEDs/m" counts LED
   // chips, not controllable pixels, and the 5 cm cut marks alone do not prove the per-meter pixel
@@ -98,6 +101,18 @@ public final class LEDConstants {
   // config timeouts. All values are preview proposals pending real-strip verification.
   public static final double CANDLE_REFRESH_INTERVAL_SEC = 2.0;
   public static final double CANDLE_INIT_RETRY_INTERVAL_SEC = 2.0;
+
+  // ---- Legacy effect tuning -------------------------------------------------------------------
+
+  // Legacy effect tuning — placeholder values until the strip is on the robot, adjust freely.
+  // Hues are WPILib HSV units (0-180).
+  public static final int SOLID_HUE = 22; // gold
+  public static final int CHASE_HUE = 160; // blue
+  public static final int BREATHE_HUE = 22; // gold
+  public static final double CHASE_SPEED_PIXELS_PER_SEC = 20.0;
+  public static final int CHASE_TAIL_PIXELS = 6;
+  public static final double BREATHE_PERIOD_SEC = 2.0;
+  public static final double RAINBOW_FULL_CYCLE_SEC = 3.0;
 
   // Theme switching (operator action): RGB crossfade between the old and new gradient.
   public static final double THEME_TRANSITION_SEC = 0.6;

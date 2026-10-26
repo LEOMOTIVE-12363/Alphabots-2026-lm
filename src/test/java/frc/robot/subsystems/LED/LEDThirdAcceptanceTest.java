@@ -38,4 +38,18 @@ class LEDThirdAcceptanceTest {
         elapsed < 20,
         "CAN configuration latency must not stall the 20 ms robot loop: " + elapsed + " ms");
   }
+
+  @Test
+  void legacyChaseMustShareNormalizedPhaseWithOnboardThumbnail() {
+    var strip = new AddressableLEDBuffer(LEDConstants.LENGTH_PIXELS);
+    var onboard = new AddressableLEDBuffer(8);
+    // At one external-strip lap, both heads should return to normalized position zero.
+    double now =
+        (strip.getLength() + LEDConstants.CHASE_TAIL_PIXELS)
+            / LEDConstants.CHASE_SPEED_PIXELS_PER_SEC;
+    LED.renderLegacyInto(strip, LEDPattern.CHASE, now, 100);
+    LED.renderLegacyInto(onboard, LEDPattern.CHASE, now, 100);
+    assertEquals(
+        strip.getLED(0), onboard.getLED(0), "Same-time Chase lap start should match at u=0");
+  }
 }
