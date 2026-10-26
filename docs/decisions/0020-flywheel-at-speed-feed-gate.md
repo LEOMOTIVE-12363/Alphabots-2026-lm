@@ -1,4 +1,4 @@
-# 0019 — Flywheel-at-speed feed gate (speed-only)
+# 0020 — Flywheel-at-speed feed gate (speed-only)
 
 - Date: 2026-10-26
 - Status: Accepted

@@ -1,16 +1,16 @@
 # 0011 — Immediate feed with only flywheel-zero gating
 
 - Date: 2026-10-24
-- Status: Superseded by [0019](0019-flywheel-at-speed-feed-gate.md)
-  (2026-10-26) for the immediate-feed policy; see 0019 for the gate restored
+- Status: Superseded by [0020](0020-flywheel-at-speed-feed-gate.md)
+  (2026-10-26) for the immediate-feed policy; see 0020 for the gate restored
   from the 0007 era with the Hood condition removed
 - Supersedes: [0007 — Continuous feed readiness gate](0007-continuous-feed-readiness-gate.md)
   for drum-at-speed, hood-at-angle, and stable-readiness feed gating
 
-> **Superseded on 2026-10-26 by [0019 — Flywheel-at-speed feed gate (speed-only)](0019-flywheel-at-speed-feed-gate.md).**
+> **Superseded on 2026-10-26 by [0020 — Flywheel-at-speed feed gate (speed-only)](0020-flywheel-at-speed-feed-gate.md).**
 > The immediate-feed policy described below is no longer the desired behavior:
 > with a hopper full of balls the first ball was pushed against a still
-> accelerating flywheel and jammed. 0019 restores at-speed gating on the
+> accelerating flywheel and jammed. 0020 restores at-speed gating on the
 > measured flywheel speed (Hood excluded). Retained from this record: the 0%
 > same-loop stop, feeding-time-only jam confirmation, retract freezing, and
 > command-reported panel decisions.
