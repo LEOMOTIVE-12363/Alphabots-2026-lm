@@ -1,7 +1,7 @@
 # 0014 — Slim the LED menu to three themes plus Off
 
 - Date: 2026-10-26
-- Status: Accepted
+- Status: Superseded by [0015](0017-led-orange-purple-fusion-restore-menu.md) later the same day — the operator asked to fully restore the removed menu entries and unify all five themes on the orange+purple fusion gradient
 
 ## Context
 

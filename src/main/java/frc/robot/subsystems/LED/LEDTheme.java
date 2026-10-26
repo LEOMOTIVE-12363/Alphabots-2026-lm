@@ -9,29 +9,53 @@ import edu.wpi.first.wpilibj.util.Color;
  * smoothstep easing — never around the HSV wheel — so the designed hues render exactly and no
  * unintended hues appear between stops.
  *
- * <p>The stop RGB values are the approved design inputs; keep them verbatim. The menu was reduced
- * to these three themes on 2026-10-26 (user decision): orange+gold Marigold Bridge, orange+purple
- * Festival Night, and teal+rose Alebrije Glow. Festival Night keeps its name but dropped its rose
- * middle stop, so saved settings restore straight into the new two-color gradient.
+ * <p>Since 2026-10-26 (user decision) every theme renders the SAME orange + purple fusion gradient:
+ * alternating purple/orange bands (ABAB) at quarters of the path, so both colors appear across the
+ * whole strip at any installed length — never "purple head, orange tail". The five entries keep
+ * their names and recommended idle effects as operator-facing presets; only the colors were
+ * unified. The stop RGB values are the approved design inputs; keep them verbatim.
  */
 public enum LEDTheme {
   MARIGOLD_BRIDGE(
       "Marigold Bridge",
       IdleEffect.SLOW_FLOW,
-      new GradientStop(0.0, 0xFF6500),
-      new GradientStop(0.62, 0xFFBC24),
-      new GradientStop(1.0, 0xFF9500)),
+      new GradientStop(0.00, 0x7020D0),
+      new GradientStop(0.25, 0xFF7900),
+      new GradientStop(0.50, 0x7020D0),
+      new GradientStop(0.75, 0xFF7900),
+      new GradientStop(1.00, 0x7020D0)),
   FESTIVAL_NIGHT(
       "Festival Night",
       IdleEffect.BREATHE,
-      new GradientStop(0.0, 0x7020D0),
-      new GradientStop(1.0, 0xFF7900)),
+      new GradientStop(0.00, 0x7020D0),
+      new GradientStop(0.25, 0xFF7900),
+      new GradientStop(0.50, 0x7020D0),
+      new GradientStop(0.75, 0xFF7900),
+      new GradientStop(1.00, 0x7020D0)),
+  PAPEL_FIESTA(
+      "Papel Fiesta",
+      IdleEffect.CHASE,
+      new GradientStop(0.00, 0x7020D0),
+      new GradientStop(0.25, 0xFF7900),
+      new GradientStop(0.50, 0x7020D0),
+      new GradientStop(0.75, 0xFF7900),
+      new GradientStop(1.00, 0x7020D0)),
   ALEBRIJE_GLOW(
       "Alebrije Glow",
       IdleEffect.SLOW_FLOW,
-      new GradientStop(0.0, 0x5636FF),
-      new GradientStop(0.60, 0x00D6B2),
-      new GradientStop(1.0, 0xFF248C));
+      new GradientStop(0.00, 0x7020D0),
+      new GradientStop(0.25, 0xFF7900),
+      new GradientStop(0.50, 0x7020D0),
+      new GradientStop(0.75, 0xFF7900),
+      new GradientStop(1.00, 0x7020D0)),
+  CANDLE_MEMORY(
+      "Candle Memory",
+      IdleEffect.STATIC,
+      new GradientStop(0.00, 0x7020D0),
+      new GradientStop(0.25, 0xFF7900),
+      new GradientStop(0.50, 0x7020D0),
+      new GradientStop(0.75, 0xFF7900),
+      new GradientStop(1.00, 0x7020D0));
 
   /** One gradient stop: path position u and the packed 0xRRGGBB design color. */
   private record GradientStop(double u, int rgb) {

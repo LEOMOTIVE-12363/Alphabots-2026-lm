@@ -3,22 +3,26 @@ package frc.robot.subsystems.LED;
 import java.util.Optional;
 
 /**
- * Built-in styles for the LED strip, selectable from the Elastic "LED Pattern" chooser.
+ * Built-in effects for the LED strip, selectable from the Elastic "LED Pattern" chooser.
  *
- * <p>Since 2026-10-26 the menu is exactly {@code Off} plus the three Day of the Dead themes (user
- * decision): the former legacy self-colored patterns (Solid, Rainbow, Chase, Breathe) and the
- * removed themes (Papel Fiesta, Candle Memory) are gone. Each theme pattern renders its {@link
- * LEDTheme} gradient with the independently chosen {@link IdleEffect} — Off is the only non-theme
- * pattern and renders black.
+ * <p>The first five are the legacy self-colored effects rendered directly by {@link LED}. The five
+ * Day of the Dead options each bind a {@link LEDTheme}: they render the theme gradient with the
+ * independently chosen {@link IdleEffect}.
  */
 public enum LEDPattern {
   OFF("Off"),
+  SOLID("Solid"),
+  RAINBOW("Rainbow"),
+  CHASE("Chase"),
+  BREATHE("Breathe"),
   MARIGOLD_BRIDGE(LEDTheme.MARIGOLD_BRIDGE),
   FESTIVAL_NIGHT(LEDTheme.FESTIVAL_NIGHT),
-  ALEBRIJE_GLOW(LEDTheme.ALEBRIJE_GLOW);
+  PAPEL_FIESTA(LEDTheme.PAPEL_FIESTA),
+  ALEBRIJE_GLOW(LEDTheme.ALEBRIJE_GLOW),
+  CANDLE_MEMORY(LEDTheme.CANDLE_MEMORY);
 
   private final String dashboardName;
-  private final LEDTheme theme; // null for Off
+  private final LEDTheme theme; // null for the five legacy patterns
 
   LEDPattern(String dashboardName) {
     this.dashboardName = dashboardName;
@@ -35,15 +39,15 @@ public enum LEDPattern {
     return dashboardName;
   }
 
-  /** The theme this pattern renders, empty for {@link #OFF}. */
+  /** The theme this pattern renders, empty for the five legacy patterns. */
   public Optional<LEDTheme> theme() {
     return Optional.ofNullable(theme);
   }
 
   /**
    * Exact dashboard-name match; an unknown or null name returns {@code fallback} (never throws).
-   * This is the boot-restore migration seam: a saved name from an older build — e.g. the removed
-   * legacy patterns or themes — resolves to the fallback instead of breaking boot.
+   * This is the boot-restore migration seam: a saved name that no longer matches any option — e.g.
+   * left over from an older build — resolves to the fallback instead of breaking boot.
    */
   public static LEDPattern fromDashboardName(String name, LEDPattern fallback) {
     if (name != null) {

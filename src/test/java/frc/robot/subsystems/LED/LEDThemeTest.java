@@ -10,15 +10,20 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * The three Day of the Dead themes are the approved visual design: their stop colors are exact RGB
- * design inputs, and the gradient between adjacent stops is a per-channel RGB smoothstep — never an
- * HSV hue-wheel interpolation, which would detour through colors that are not in the design (purple
- * to orange around the wheel passes through blue and green).
+ * The five Day of the Dead themes share one approved fusion design (user decision 2026-10-26):
+ * alternating purple/orange bands (ABAB) at quarters of the path, so both colors appear across the
+ * whole strip at any installed length. Stop colors are exact RGB design inputs, and the gradient
+ * between adjacent stops is a per-channel RGB smoothstep — never an HSV hue-wheel interpolation,
+ * which would detour through colors that are not in the design.
  */
 class LEDThemeTest {
   // Stop colors are 8-bit design values; anything within one LSB is the same color.
   private static final double CHANNEL_EPS = 1.0 / 255.0 + 1e-9;
   private static final double EPS = 1e-9;
+
+  // The unified fusion design: purple #7020D0 on the even quarter stops, orange #FF7900 on the odd.
+  private static final int[] PURPLE = {112, 32, 208};
+  private static final int[] ORANGE = {255, 121, 0};
 
   private static void assertStop(LEDTheme theme, double u, int r, int g, int b) {
     Color c = theme.colorAt(u);
@@ -36,18 +41,24 @@ class LEDThemeTest {
 
   @Test
   void everyStopReproducesItsExactDesignColor() {
-    assertStop(LEDTheme.MARIGOLD_BRIDGE, 0.0, 255, 101, 0);
-    assertStop(LEDTheme.MARIGOLD_BRIDGE, 0.62, 255, 188, 36);
-    assertStop(LEDTheme.MARIGOLD_BRIDGE, 1.0, 255, 149, 0);
+    for (LEDTheme theme : LEDTheme.values()) {
+      assertStop(theme, 0.00, PURPLE[0], PURPLE[1], PURPLE[2]);
+      assertStop(theme, 0.25, ORANGE[0], ORANGE[1], ORANGE[2]);
+      assertStop(theme, 0.50, PURPLE[0], PURPLE[1], PURPLE[2]);
+      assertStop(theme, 0.75, ORANGE[0], ORANGE[1], ORANGE[2]);
+      assertStop(theme, 1.00, PURPLE[0], PURPLE[1], PURPLE[2]);
+    }
+  }
 
-    // Orange + purple (user requirement): the former rose middle stop #FF167A was removed on
-    // 2026-10-26, leaving a clean two-color gradient.
-    assertStop(LEDTheme.FESTIVAL_NIGHT, 0.0, 112, 32, 208);
-    assertStop(LEDTheme.FESTIVAL_NIGHT, 1.0, 255, 121, 0);
-
-    assertStop(LEDTheme.ALEBRIJE_GLOW, 0.0, 86, 54, 255);
-    assertStop(LEDTheme.ALEBRIJE_GLOW, 0.60, 0, 214, 178);
-    assertStop(LEDTheme.ALEBRIJE_GLOW, 1.0, 255, 36, 140);
+  @Test
+  void everyThemeRendersTheIdenticalFusionGradient() {
+    // The five entries are color-identical presets (names + recommended effects differ only).
+    for (double u = 0.0; u <= 1.0; u += 0.01) {
+      Color reference = LEDTheme.MARIGOLD_BRIDGE.colorAt(u);
+      for (LEDTheme theme : LEDTheme.values()) {
+        assertColorEquals(reference, theme.colorAt(u), EPS, theme + " at u=" + u);
+      }
+    }
   }
 
   @Test
@@ -60,49 +71,57 @@ class LEDThemeTest {
 
   @Test
   void segmentMidpointIsAPerChannelRgbSmoothstep() {
-    // Festival Night is a single [0, 1] segment from #7020D0 to #FF7900. At the midpoint
+    // The first segment runs u in [0, 0.25] from #7020D0 to #FF7900. At the segment midpoint
     // smoothstep(0.5) = 0.5, so every channel is the plain average of the two stop channels.
-    Color mid = LEDTheme.FESTIVAL_NIGHT.colorAt(0.5);
+    Color mid = LEDTheme.FESTIVAL_NIGHT.colorAt(0.125);
     assertEquals((112.0 + 255.0) / 2.0 / 255.0, mid.red, CHANNEL_EPS, "midpoint red");
     assertEquals((32.0 + 121.0) / 2.0 / 255.0, mid.green, CHANNEL_EPS, "midpoint green");
     assertEquals((208.0 + 0.0) / 2.0 / 255.0, mid.blue, CHANNEL_EPS, "midpoint blue");
   }
 
   @Test
-  void gradientNeverTakesTheHueWheelDetour() {
-    // #7020D0 (purple) to #FF7900 (orange): one way around the HSV wheel passes through blue,
-    // cyan, and green, where the red channel falls to ~0. Per-channel RGB interpolation keeps red
-    // climbing monotonically between the two stop channels instead.
-    double prevRed = -1.0;
+  void gradientStaysWithinTheTwoDesignColorsChannelEnvelope() {
+    // Never the HSV hue wheel: per-channel RGB interpolation keeps every channel inside the
+    // [min(purple, orange), max(purple, orange)] envelope of the two design colors, and each
+    // channel is monotonic within every band (it only turns around exactly at the stops).
     for (int i = 0; i <= 100; i++) {
       double u = i * 0.01;
-      double red = LEDTheme.FESTIVAL_NIGHT.colorAt(u).red;
-      assertTrue(red >= 112.0 / 255.0 - CHANNEL_EPS, "red fell below the start stop at u=" + u);
-      assertTrue(red >= prevRed - EPS, "red must climb monotonically, dipped at u=" + u);
-      prevRed = red;
+      Color c = LEDTheme.FESTIVAL_NIGHT.colorAt(u);
+      String where = "at u=" + u;
+      assertTrue(c.red >= 112.0 / 255.0 - CHANNEL_EPS, "red below envelope " + where);
+      assertTrue(c.red <= 255.0 / 255.0 + CHANNEL_EPS, "red above envelope " + where);
+      assertTrue(c.green >= 32.0 / 255.0 - CHANNEL_EPS, "green below envelope " + where);
+      assertTrue(c.green <= 121.0 / 255.0 + CHANNEL_EPS, "green above envelope " + where);
+      assertTrue(c.blue >= 0.0 - CHANNEL_EPS, "blue below envelope " + where);
+      assertTrue(c.blue <= 208.0 / 255.0 + CHANNEL_EPS, "blue above envelope " + where);
     }
-    // Late in the gradient the color is essentially the orange stop, not a hue-wheel halfway color.
-    assertTrue(LEDTheme.FESTIVAL_NIGHT.colorAt(0.8).red > 0.9);
+    // Halfway through the first band the color is a genuine RGB blend, not a hue-wheel detour
+    // (which would drop red toward 0 while heading around through blue/cyan/green).
+    Color halfBand = LEDTheme.FESTIVAL_NIGHT.colorAt(0.125);
+    assertTrue(halfBand.red > 0.6, "mid-band red collapsed toward a wheel detour");
   }
 
   @Test
   void dashboardNamesMatchTheApprovedThemeNamesAndAreUnique() {
     assertEquals("Marigold Bridge", LEDTheme.MARIGOLD_BRIDGE.getDashboardName());
     assertEquals("Festival Night", LEDTheme.FESTIVAL_NIGHT.getDashboardName());
+    assertEquals("Papel Fiesta", LEDTheme.PAPEL_FIESTA.getDashboardName());
     assertEquals("Alebrije Glow", LEDTheme.ALEBRIJE_GLOW.getDashboardName());
+    assertEquals("Candle Memory", LEDTheme.CANDLE_MEMORY.getDashboardName());
 
     Set<String> names = new HashSet<>();
     for (LEDTheme theme : LEDTheme.values()) {
       assertTrue(names.add(theme.getDashboardName()), "duplicate dashboard name: " + theme);
     }
-    assertEquals(3, names.size(), "the menu carries exactly three themes");
   }
 
   @Test
   void recommendedEffectsMatchTheDesign() {
     assertSame(IdleEffect.SLOW_FLOW, LEDTheme.MARIGOLD_BRIDGE.getRecommendedEffect());
     assertSame(IdleEffect.BREATHE, LEDTheme.FESTIVAL_NIGHT.getRecommendedEffect());
+    assertSame(IdleEffect.CHASE, LEDTheme.PAPEL_FIESTA.getRecommendedEffect());
     assertSame(IdleEffect.SLOW_FLOW, LEDTheme.ALEBRIJE_GLOW.getRecommendedEffect());
+    assertSame(IdleEffect.STATIC, LEDTheme.CANDLE_MEMORY.getRecommendedEffect());
   }
 
   @Test
@@ -110,21 +129,12 @@ class LEDThemeTest {
     for (LEDTheme theme : LEDTheme.values()) {
       assertSame(theme, LEDTheme.fromDashboardName(theme.getDashboardName(), null));
     }
-    // Removed themes must resolve to the fallback — they cannot break boot or resurrect.
-    for (String removed : new String[] {"Papel Fiesta", "Candle Memory"}) {
-      assertSame(
-          LEDTheme.MARIGOLD_BRIDGE,
-          LEDTheme.fromDashboardName(removed, LEDTheme.MARIGOLD_BRIDGE),
-          "removed theme " + removed + " must fall back");
-    }
     assertSame(
-        LEDTheme.MARIGOLD_BRIDGE,
-        LEDTheme.fromDashboardName("Not A Theme", LEDTheme.MARIGOLD_BRIDGE));
-    assertSame(
-        LEDTheme.MARIGOLD_BRIDGE, LEDTheme.fromDashboardName(null, LEDTheme.MARIGOLD_BRIDGE));
+        LEDTheme.CANDLE_MEMORY, LEDTheme.fromDashboardName("Not A Theme", LEDTheme.CANDLE_MEMORY));
+    assertSame(LEDTheme.CANDLE_MEMORY, LEDTheme.fromDashboardName(null, LEDTheme.CANDLE_MEMORY));
     // Exact match only: a case variant of a real name is an unknown name.
     assertSame(
-        LEDTheme.MARIGOLD_BRIDGE,
-        LEDTheme.fromDashboardName("marigold bridge", LEDTheme.MARIGOLD_BRIDGE));
+        LEDTheme.CANDLE_MEMORY,
+        LEDTheme.fromDashboardName("marigold bridge", LEDTheme.CANDLE_MEMORY));
   }
 }

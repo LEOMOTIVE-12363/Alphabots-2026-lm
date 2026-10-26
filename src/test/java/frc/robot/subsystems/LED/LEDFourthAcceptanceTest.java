@@ -33,6 +33,36 @@ class LEDFourthAcceptanceTest {
   }
 
   @Test
+  void chaseThumbnailEndpointMatchesExternalEndpoint() {
+    var strip = new AddressableLEDBuffer(LEDConstants.LENGTH_PIXELS);
+    var board = new AddressableLEDBuffer(8);
+    double now = (strip.getLength() - 1) / LEDConstants.CHASE_SPEED_PIXELS_PER_SEC;
+    LED.renderLegacyInto(strip, LEDPattern.CHASE, now, 100);
+    LED.renderLegacyInto(board, LEDPattern.CHASE, now, 100);
+    assertEquals(
+        strip.getLED(strip.getLength() - 1),
+        board.getLED(7),
+        "u=1 must represent the actual final external pixel at t=" + now);
+  }
+
+  @Test
+  void chaseThumbnailMustBeDarkWhenExternalTailHasExited() {
+    var strip = new AddressableLEDBuffer(LEDConstants.LENGTH_PIXELS);
+    var board = new AddressableLEDBuffer(8);
+    double now =
+        (strip.getLength() - 1 + LEDConstants.CHASE_TAIL_PIXELS)
+            / LEDConstants.CHASE_SPEED_PIXELS_PER_SEC;
+    LED.renderLegacyInto(strip, LEDPattern.CHASE, now, 100);
+    LED.renderLegacyInto(board, LEDPattern.CHASE, now, 100);
+    for (int i = 0; i < strip.getLength(); i++)
+      assertEquals(0, strip.getRed(i) + strip.getGreen(i) + strip.getBlue(i));
+    assertEquals(
+        0,
+        board.getRed(7) + board.getGreen(7) + board.getBlue(7),
+        "Thumbnail tail must also exit at t=" + now);
+  }
+
+  @Test
   void failedKeepaliveMustRespectRetryInterval() {
     checkRetry(false);
   }
