@@ -135,11 +135,7 @@ class LEDControllerIntegrationTest {
   void demoBackCyclesThemesInOrderAndWraps() {
     connect(DriverControls.DEMO_PORT);
     LEDPattern[] expected = {
-      LEDPattern.FESTIVAL_NIGHT,
-      LEDPattern.PAPEL_FIESTA,
-      LEDPattern.ALEBRIJE_GLOW,
-      LEDPattern.CANDLE_MEMORY,
-      LEDPattern.MARIGOLD_BRIDGE
+      LEDPattern.FESTIVAL_NIGHT, LEDPattern.ALEBRIJE_GLOW, LEDPattern.MARIGOLD_BRIDGE
     };
     for (LEDPattern pattern : expected) {
       click(DriverControls.DEMO_PORT, BUTTON_BACK);
@@ -150,7 +146,7 @@ class LEDControllerIntegrationTest {
   @Test
   void demoStartCyclesIdleEffectsInOrderAndWraps() {
     connect(DriverControls.DEMO_PORT);
-    selectFromElastic(LEDPattern.CANDLE_MEMORY, IdleEffect.STATIC);
+    selectFromElastic(LEDPattern.FESTIVAL_NIGHT, IdleEffect.STATIC);
     IdleEffect[] expected = {
       IdleEffect.BREATHE,
       IdleEffect.SLOW_FLOW,
@@ -160,7 +156,7 @@ class LEDControllerIntegrationTest {
     };
     for (IdleEffect effect : expected) {
       click(DriverControls.DEMO_PORT, BUTTON_START);
-      assertSelection(LEDPattern.CANDLE_MEMORY, effect);
+      assertSelection(LEDPattern.FESTIVAL_NIGHT, effect);
     }
   }
 
@@ -174,50 +170,45 @@ class LEDControllerIntegrationTest {
     release(DriverControls.DEMO_PORT, BUTTON_BACK);
     hold(DriverControls.DEMO_PORT, BUTTON_BACK);
     settle(4);
-    assertSelection(LEDPattern.PAPEL_FIESTA, IdleEffect.CHASE);
+    assertSelection(LEDPattern.ALEBRIJE_GLOW, IdleEffect.SLOW_FLOW);
   }
 
   @Test
   void startHoldIsOneEdgeAndOnlyRepressAdvancesAgain() {
     connect(DriverControls.DEMO_PORT);
-    selectFromElastic(LEDPattern.CANDLE_MEMORY, IdleEffect.STATIC);
+    selectFromElastic(LEDPattern.FESTIVAL_NIGHT, IdleEffect.STATIC);
     hold(DriverControls.DEMO_PORT, BUTTON_START);
     settle(10);
-    assertSelection(LEDPattern.CANDLE_MEMORY, IdleEffect.BREATHE);
+    assertSelection(LEDPattern.FESTIVAL_NIGHT, IdleEffect.BREATHE);
 
     release(DriverControls.DEMO_PORT, BUTTON_START);
     hold(DriverControls.DEMO_PORT, BUTTON_START);
     settle(4);
-    assertSelection(LEDPattern.CANDLE_MEMORY, IdleEffect.SLOW_FLOW);
+    assertSelection(LEDPattern.FESTIVAL_NIGHT, IdleEffect.SLOW_FLOW);
   }
 
   @Test
   void elasticSelectionsAreTheNextCycleStartingPoint() {
     connect(DriverControls.DEMO_PORT);
-    setElasticPattern(LEDPattern.PAPEL_FIESTA);
+    setElasticPattern(LEDPattern.ALEBRIJE_GLOW);
     click(DriverControls.DEMO_PORT, BUTTON_BACK);
-    assertSelection(LEDPattern.ALEBRIJE_GLOW, IdleEffect.SLOW_FLOW);
+    assertSelection(LEDPattern.MARIGOLD_BRIDGE, IdleEffect.SLOW_FLOW);
 
     setElasticEffect(IdleEffect.BREATHE);
     click(DriverControls.DEMO_PORT, BUTTON_START);
-    assertSelection(LEDPattern.ALEBRIJE_GLOW, IdleEffect.SLOW_FLOW);
+    assertSelection(LEDPattern.MARIGOLD_BRIDGE, IdleEffect.SLOW_FLOW);
   }
 
   @Test
-  void everyLegacyPatternBacksToMarigoldAndStartIsACompleteNoOp() {
+  void offBacksToMarigoldAndStartIsACompleteNoOp() {
     connect(DriverControls.DEMO_PORT);
-    LEDPattern[] legacy = {
-      LEDPattern.OFF, LEDPattern.SOLID, LEDPattern.RAINBOW, LEDPattern.CHASE, LEDPattern.BREATHE
-    };
-    for (LEDPattern pattern : legacy) {
-      selectFromElastic(pattern, IdleEffect.COLOR_STEP);
-      click(DriverControls.DEMO_PORT, BUTTON_BACK);
-      assertSelection(LEDPattern.MARIGOLD_BRIDGE, IdleEffect.SLOW_FLOW);
+    selectFromElastic(LEDPattern.OFF, IdleEffect.COLOR_STEP);
+    click(DriverControls.DEMO_PORT, BUTTON_BACK);
+    assertSelection(LEDPattern.MARIGOLD_BRIDGE, IdleEffect.SLOW_FLOW);
 
-      selectFromElastic(pattern, IdleEffect.CHASE);
-      click(DriverControls.DEMO_PORT, BUTTON_START);
-      assertSelection(pattern, IdleEffect.CHASE);
-    }
+    selectFromElastic(LEDPattern.OFF, IdleEffect.CHASE);
+    click(DriverControls.DEMO_PORT, BUTTON_START);
+    assertSelection(LEDPattern.OFF, IdleEffect.CHASE);
   }
 
   @Test
@@ -235,17 +226,17 @@ class LEDControllerIntegrationTest {
   @Test
   void realPeriodicSynchronizesDashboardRenderingAndSavedFile() throws Exception {
     connect(DriverControls.DEMO_PORT);
-    setElasticPattern(LEDPattern.CANDLE_MEMORY);
+    setElasticPattern(LEDPattern.FESTIVAL_NIGHT);
     setElasticEffect(IdleEffect.COLOR_STEP);
     click(DriverControls.DEMO_PORT, BUTTON_START);
     settle(40);
 
-    assertSelection(LEDPattern.CANDLE_MEMORY, IdleEffect.STATIC);
+    assertSelection(LEDPattern.FESTIVAL_NIGHT, IdleEffect.STATIC);
     settings.saveNow();
     assertTrue(Files.isRegularFile(settingsPath), "the real settings file must exist");
     DashboardSettingsFile reopened = new DashboardSettingsFile(settingsPath);
     assertEquals(
-        LEDPattern.CANDLE_MEMORY.getDashboardName(),
+        LEDPattern.FESTIVAL_NIGHT.getDashboardName(),
         reopened.getString(LED.PATTERN_SETTING_KEY, "missing"));
     assertEquals(
         IdleEffect.STATIC.getDashboardName(),
@@ -253,29 +244,29 @@ class LEDControllerIntegrationTest {
 
     AddressableLEDBuffer rendered = ledBuffer();
     int last = LEDConstants.LENGTH_PIXELS - 1;
-    assertStaticCandlePixel(rendered, 0);
-    assertStaticCandlePixel(rendered, last / 2);
-    assertStaticCandlePixel(rendered, last);
+    assertStaticFestivalPixel(rendered, 0);
+    assertStaticFestivalPixel(rendered, last / 2);
+    assertStaticFestivalPixel(rendered, last);
   }
 
   @Test
   void fullBackIsIgnoredAndFullStartKeepsSimulationResetWithoutCyclingEffect() {
     connect(DriverControls.FULL_PORT);
-    selectFromElastic(LEDPattern.CANDLE_MEMORY, IdleEffect.COLOR_STEP);
+    selectFromElastic(LEDPattern.FESTIVAL_NIGHT, IdleEffect.COLOR_STEP);
     Drive.mInstance.setPose(new Pose2d(3.0, 2.0, Rotation2d.fromDegrees(137)));
 
     click(DriverControls.FULL_PORT, BUTTON_BACK);
-    assertSelection(LEDPattern.CANDLE_MEMORY, IdleEffect.COLOR_STEP);
+    assertSelection(LEDPattern.FESTIVAL_NIGHT, IdleEffect.COLOR_STEP);
     assertDrivePose(3.0, 2.0, 137.0);
 
     connect(DriverControls.DEMO_PORT);
     click(DriverControls.FULL_PORT, BUTTON_START);
-    assertSelection(LEDPattern.CANDLE_MEMORY, IdleEffect.COLOR_STEP);
+    assertSelection(LEDPattern.FESTIVAL_NIGHT, IdleEffect.COLOR_STEP);
     assertDrivePose(3.0, 2.0, 137.0);
 
     disconnect(DriverControls.DEMO_PORT);
     click(DriverControls.FULL_PORT, BUTTON_START);
-    assertSelection(LEDPattern.CANDLE_MEMORY, IdleEffect.COLOR_STEP);
+    assertSelection(LEDPattern.FESTIVAL_NIGHT, IdleEffect.COLOR_STEP);
     assertDrivePose(1.5, 4.0, 0.0);
     assertEquals(1.5, MapleSimArena.getInstance().getRobotPose().getX(), EPS);
     assertEquals(4.0, MapleSimArena.getInstance().getRobotPose().getY(), EPS);
@@ -292,16 +283,16 @@ class LEDControllerIntegrationTest {
     assertSelection(LEDPattern.FESTIVAL_NIGHT, IdleEffect.BREATHE);
     hold(DriverControls.DEMO_PORT, BUTTON_BACK);
     settle(4);
-    assertSelection(LEDPattern.PAPEL_FIESTA, IdleEffect.CHASE);
+    assertSelection(LEDPattern.ALEBRIJE_GLOW, IdleEffect.SLOW_FLOW);
 
     disconnect(DriverControls.DEMO_PORT);
-    assertSelection(LEDPattern.PAPEL_FIESTA, IdleEffect.CHASE);
+    assertSelection(LEDPattern.ALEBRIJE_GLOW, IdleEffect.SLOW_FLOW);
     click(DriverControls.FULL_PORT, BUTTON_BACK);
-    assertSelection(LEDPattern.PAPEL_FIESTA, IdleEffect.CHASE);
+    assertSelection(LEDPattern.ALEBRIJE_GLOW, IdleEffect.SLOW_FLOW);
 
     connect(DriverControls.DEMO_PORT);
     click(DriverControls.DEMO_PORT, BUTTON_BACK);
-    assertSelection(LEDPattern.ALEBRIJE_GLOW, IdleEffect.SLOW_FLOW);
+    assertSelection(LEDPattern.MARIGOLD_BRIDGE, IdleEffect.SLOW_FLOW);
   }
 
   @Test
@@ -491,9 +482,9 @@ class LEDControllerIntegrationTest {
         "drive heading");
   }
 
-  private static void assertStaticCandlePixel(AddressableLEDBuffer buffer, int index) {
+  private static void assertStaticFestivalPixel(AddressableLEDBuffer buffer, int index) {
     double u = LEDConstants.SECTIONS[0].uForPixel(index);
-    Color expected = LEDTheme.CANDLE_MEMORY.colorAt(u);
+    Color expected = LEDTheme.FESTIVAL_NIGHT.colorAt(u);
     assertEquals(to255(expected.red), buffer.getRed(index), "red at pixel " + index);
     assertEquals(to255(expected.green), buffer.getGreen(index), "green at pixel " + index);
     assertEquals(to255(expected.blue), buffer.getBlue(index), "blue at pixel " + index);

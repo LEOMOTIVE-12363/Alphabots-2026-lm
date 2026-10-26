@@ -42,12 +42,12 @@ class LEDBehaviorTest {
   private static final int SAMPLES_PER_PERIOD = 12;
   private static final StyleCase STATIC_STYLE =
       new StyleCase(
-          "Candle Memory Static",
-          LEDPattern.CANDLE_MEMORY,
+          "Festival Night Static",
+          LEDPattern.FESTIVAL_NIGHT,
           IdleEffect.STATIC,
           1.0,
           false,
-          0xFF9500);
+          0x7020D0);
   private static final List<StyleCase> ANIMATED_STYLES =
       List.of(
           new StyleCase(
@@ -69,13 +69,6 @@ class LEDBehaviorTest {
               LEDPattern.MARIGOLD_BRIDGE,
               IdleEffect.BREATHE,
               LEDConstants.IDLE_BREATHE_PERIOD_SEC,
-              true,
-              null),
-          new StyleCase(
-              "legacy Rainbow",
-              LEDPattern.RAINBOW,
-              IdleEffect.STATIC,
-              LEDConstants.RAINBOW_FULL_CYCLE_SEC,
               true,
               null));
 
@@ -223,7 +216,7 @@ class LEDBehaviorTest {
     assertHasNonBlack(expectedExternal, style.name() + " external reference is entirely black");
     assertHasNonBlack(expectedOnboard, style.name() + " onboard reference is entirely black");
     if (style.expectedFirstPixel() != null) {
-      // Independent design-stop literal: CANDLE_MEMORY starts at RGB FF9500, not a render-derived
+      // Independent design-stop literal: FESTIVAL_NIGHT starts at RGB 7020D0, not a render-derived
       // expectation. This catches a test that accidentally selects the wrong theme or black output.
       assertEquals(
           style.expectedFirstPixel().intValue(),

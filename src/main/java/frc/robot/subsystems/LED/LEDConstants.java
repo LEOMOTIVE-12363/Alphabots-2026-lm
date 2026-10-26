@@ -99,18 +99,6 @@ public final class LEDConstants {
   public static final double CANDLE_REFRESH_INTERVAL_SEC = 2.0;
   public static final double CANDLE_INIT_RETRY_INTERVAL_SEC = 2.0;
 
-  // ---- Legacy effect tuning -------------------------------------------------------------------
-
-  // Legacy effect tuning — placeholder values until the strip is on the robot, adjust freely.
-  // Hues are WPILib HSV units (0-180).
-  public static final int SOLID_HUE = 22; // gold
-  public static final int CHASE_HUE = 160; // blue
-  public static final int BREATHE_HUE = 22; // gold
-  public static final double CHASE_SPEED_PIXELS_PER_SEC = 20.0;
-  public static final int CHASE_TAIL_PIXELS = 6;
-  public static final double BREATHE_PERIOD_SEC = 2.0;
-  public static final double RAINBOW_FULL_CYCLE_SEC = 3.0;
-
   // Theme switching (operator action): RGB crossfade between the old and new gradient.
   public static final double THEME_TRANSITION_SEC = 0.6;
 
