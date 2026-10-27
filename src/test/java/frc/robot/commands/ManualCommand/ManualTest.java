@@ -323,13 +323,59 @@ class ManualTest {
     }
 
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+    for (int i = 0; i < 50; i++) {
+      injectDrumVelocity(0.0);
+      step(manual);
+      assertEquals(
+          0.0,
+          Feeder.mInstance.getVelocitySetpointRotPerSec(),
+          EPS,
+          "feeding and 0% time must not advance the timeout, early loop " + i);
+    }
     boolean forceFed = false;
-    for (int i = 0; i < 95 && !forceFed; i++) {
+    for (int i = 50; i < 95 && !forceFed; i++) {
       injectDrumVelocity(0.0);
       step(manual);
       forceFed = Feeder.mInstance.getVelocitySetpointRotPerSec() > 0;
     }
     assertTrue(forceFed, "the original 1.8 s wait survives feeding and the 0% pause");
+    manual.end(true);
+  }
+
+  @Test
+  void zeroPauseDuringStartupPreservesEarlierWaitButDoesNotCount() throws Exception {
+    Manual manual = new Manual();
+    manual.initialize();
+    for (int i = 0; i < 60; i++) {
+      injectDrumVelocity(0.0);
+      step(manual);
+      assertEquals(
+          0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS, "initial wait loop " + i);
+    }
+
+    DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
+    for (int i = 0; i < 100; i++) {
+      step(manual);
+      assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS, "0% loop " + i);
+    }
+
+    DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+    for (int i = 0; i < 60; i++) {
+      injectDrumVelocity(0.0);
+      step(manual);
+      assertEquals(
+          0.0,
+          Feeder.mInstance.getVelocitySetpointRotPerSec(),
+          EPS,
+          "0% time must not count, early loop " + i);
+    }
+    boolean forceFed = false;
+    for (int i = 60; i < 130 && !forceFed; i++) {
+      injectDrumVelocity(0.0);
+      step(manual);
+      forceFed = Feeder.mInstance.getVelocitySetpointRotPerSec() > 0;
+    }
+    assertTrue(forceFed, "the earlier positive-limit waiting is preserved");
     manual.end(true);
   }
 
