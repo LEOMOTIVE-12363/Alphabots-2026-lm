@@ -1778,6 +1778,92 @@ class TeleopIntegrationTest {
     release(0, BUTTON_Y);
   }
 
+  @Test
+  void shootingReleaseKeepsDashboardHoodTargetWithoutAutoZero() {
+    connect(1);
+    DashboardControlsTestUtil.set(HOOD, 100.0);
+    stepRobot();
+    Hood.mInstance.periodic();
+    assertHoodPositionTarget(
+        45.0 / 360.0, "idle following applies the 100 percent dashboard target before the shot");
+
+    press(1, BUTTON_RB);
+    refreshShotRequests();
+    assertHoodPositionTarget(45.0 / 360.0, "the held shot drives the same 45 degree target");
+
+    release(1, BUTTON_RB);
+    Hood.mInstance.periodic(); // exposes this loop's end() write before the follower can restore it
+    assertHoodPositionTarget(
+        45.0 / 360.0, "releasing the shot button must not re-zero the hood target");
+    assertEquals(
+        100.0,
+        NetworkTableInstance.getDefault().getEntry("/SmartDashboard/Hood Angle (%)").getDouble(-1),
+        EPS,
+        "the Elastic input itself must stay at 100 after the shot ends");
+
+    settleToPublish(); // the 10 Hz block must publish the held (not re-zeroed) hood
+    Hood.mInstance.periodic();
+    assertEquals(
+        100.0,
+        NetworkTableInstance.getDefault()
+            .getEntry("/SmartDashboard/Hood Actual Angle (%)")
+            .getDouble(-1),
+        EPS,
+        "the measured hood must hold 100 percent after the shot ends");
+    refreshShotRequests();
+    assertFeedPathStopped();
+    assertEquals(
+        MotorIO.ControlMode.DISABLED,
+        Drum.mInstance.getControlMode(),
+        "the drum must stay stopped after releasing the shot button");
+  }
+
+  @Test
+  void disableDuringShootingKeepsDashboardHoodTargetWithoutAutoZero() {
+    connect(1);
+    DashboardControlsTestUtil.set(HOOD, 100.0);
+    press(1, BUTTON_RB);
+    assertTrue(stepUntilFeeding(40), "reached SHOOT before disabling");
+    refreshShotRequests();
+    assertHoodPositionTarget(45.0 / 360.0, "the volley drives the 45 degree dashboard target");
+
+    DriverStationSim.setEnabled(false);
+    for (int i = 0; i < 5; i++) {
+      stepRobot();
+      Hood.mInstance.periodic();
+      assertHoodPositionTarget(
+          45.0 / 360.0, "disabled loop " + i + " must keep the dashboard hood target");
+      assertEquals(
+          100.0,
+          NetworkTableInstance.getDefault()
+              .getEntry("/SmartDashboard/Hood Angle (%)")
+              .getDouble(-1),
+          EPS,
+          "the Elastic input must stay at 100 while disabled, loop " + i);
+    }
+    assertFeedPathStopped();
+    assertEquals(
+        MotorIO.ControlMode.DISABLED, Drum.mInstance.getControlMode(), "disable stopped the drum");
+
+    DriverStationSim.setEnabled(true);
+    // Re-enabled with no shot running: after the default command registers and executes, the
+    // dashboard target must simply continue to hold — nothing may move on its own.
+    for (int i = 0; i < 25; i++) {
+      stepRobot();
+      Hood.mInstance.periodic();
+      assertHoodPositionTarget(
+          45.0 / 360.0, "re-enabled loop " + i + " keeps the dashboard hood target");
+      assertEquals(0.0, feederSetpoint(), EPS, "no self-resumed feed, loop " + i);
+      assertEquals(
+          MotorIO.ControlMode.DISABLED,
+          Drum.mInstance.getControlMode(),
+          "re-enable must not spin the drum back up, loop " + i);
+    }
+    assertFeedPathStopped();
+
+    release(1, BUTTON_RB);
+  }
+
   // ---------------------------------------------------------------------------
   // 2026-10-24 local acceptance gaps: unbound demo-pad keys, cross-command
   // interruption, intake takeover, and the Elastic layout key contract.
