@@ -40,12 +40,12 @@ import org.littletonrobotics.junction.Logger;
  * under load).
  *
  * <p>UNJAM always runs its back-off to completion regardless of readiness — clearing a jam is never
- * suppressed by the not-ready gate — then routes through PAUSED instead of resuming directly, so
- * forward feeding restarts only once the flywheel is stable-ready again (it may have sagged while
- * stalled; the readiness debounce is reset at jam entry, so the post-unjam volley re-earns a full
- * stable window). The jam confirmation window only accumulates while feeding: every non-feeding
- * state (SPIN_UP, PAUSED, UNJAM) keeps feeding the jam debouncer clear samples, so time spent
- * spinning up, paused, or backing out a jam never pre-fills the window.
+ * suppressed by the not-ready gate — then routes through PAUSED. Forward feeding normally re-earns
+ * a full stable window because the readiness debounce resets at jam entry; an already-active
+ * force-feed latch instead resumes directly after the back-off. The jam confirmation window only
+ * accumulates while feeding: every non-feeding state (SPIN_UP, PAUSED, UNJAM) keeps feeding the jam
+ * debouncer clear samples, so time spent spinning up, paused, or backing out a jam never pre-fills
+ * the window.
  *
  * <p>Releasing the key still ends the command outright: nothing auto-resumes after end(), and the
  * whileTrue binding re-initializes the command (and the readiness debounce) on the next press.
@@ -236,9 +236,9 @@ public class Shooting extends Command {
   }
 
   /**
-   * Back the stalled fuel out of the indexer, then re-gate through PAUSED: forward feeding resumes
-   * only once the flywheel is stable-ready again. The back-off runs to completion regardless of
-   * readiness — clearing a jam must never be suppressed by the not-ready gate.
+   * Back the stalled fuel out of the indexer, then re-gate through PAUSED: forward feeding normally
+   * resumes only once the flywheel is stable-ready again, or immediately when force-feed is already
+   * active. The back-off itself always completes regardless of readiness.
    */
   private void unjam() {
     // Back-off time must not pre-fill the next jam confirmation window, and it is not gate
