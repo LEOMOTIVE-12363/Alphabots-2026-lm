@@ -3,7 +3,6 @@ package frc.robot.commands.ShootingCommand;
 import static frc.robot.util.DashboardControlsTestUtil.FLYWHEEL;
 import static frc.robot.util.DashboardControlsTestUtil.FORCE_FEED_TIMEOUT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -32,9 +31,9 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Measurement faults with the target left unchanged: the drum sags below its setpoint and the hood
- * drifts off its target. ShootingTest covers target-side edits and the 0% limit; these tests prove
- * that a measured drum fault pauses feeding on the very loop it appears (the flywheel-speed gate)
- * while a measured hood fault never does, and that recovery auto-resumes the volley.
+ * drifts off its target. ShootingTest covers target-side edits and the 0% limit. After the startup
+ * gate releases, measured drum sag must not interrupt feeding and measured hood drift never does;
+ * the startup and 0% recovery gates still apply.
  *
  * <p>Injection semantics: the sim mechanism IO is instant-setpoint (the measured state snaps to the
  * setpoint every periodic), so an injected value only exists for the execute() it precedes and is
@@ -160,41 +159,35 @@ class ShootingMeasurementFaultTest {
   }
 
   @Test
-  void measuredDrumSagPausesSameLoopAndAutoResumes() throws Exception {
+  void measuredDrumSagDoesNotInterruptFeedAfterGateRelease() throws Exception {
     assertNull(Drive.mInstance, "test must run with no drivetrain / pose source");
     Shooting s = new Shooting(false);
     s.initialize();
     assertTrue(stepUntilFeeding(s, 30), "reached SHOOT");
 
     double targetBefore = Drum.mInstance.getVelocitySetpointRotPerSec();
-    injectDrumVelocity(DRUM_SAG_ROTPS);
-    assertTrue(
-        Math.abs(Drum.mInstance.getVelocityRotPerSec() - targetBefore)
-            >= ShootingConstants.SHOOTER_VELOCITY_TOLERANCE_ROTPS,
-        "the injected drum measurement is genuinely outside the readiness tolerance");
-    step(s);
-    assertEquals(0.0, feederSetpoint(), EPS, "drum sag stops the feeder on the detection loop");
-    assertEquals(0.0, indexerSetpoint(), EPS, "indexer stops too");
-    assertEquals(
-        targetBefore,
-        Drum.mInstance.getVelocitySetpointRotPerSec(),
-        EPS,
-        "drum keeps being driven to the unchanged target");
-    assertEquals("PAUSED", stateOf(s));
-
-    // Sustained sag keeps the volley paused; the retract timer stays frozen for that stretch.
-    double retractAtPause = retractElapsed(s);
+    double retractBeforeSag = retractElapsed(s);
     for (int i = 0; i < 10; i++) {
       injectDrumVelocity(DRUM_SAG_ROTPS);
+      assertTrue(
+          Math.abs(Drum.mInstance.getVelocityRotPerSec() - targetBefore)
+              >= ShootingConstants.SHOOTER_VELOCITY_TOLERANCE_ROTPS,
+          "the injected drum measurement is genuinely outside the readiness tolerance");
       step(s);
-      assertEquals(0.0, feederSetpoint(), EPS, "sustained sag keeps the volley paused, loop " + i);
+      assertTrue(isFeeding(), "a post-release drum sag must not stop the feeder, loop " + i);
+      assertEquals(
+          ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+          indexerSetpoint(),
+          EPS,
+          "indexer also keeps feeding, loop " + i);
+      assertEquals(
+          targetBefore,
+          Drum.mInstance.getVelocitySetpointRotPerSec(),
+          EPS,
+          "drum keeps being driven to the unchanged target");
+      assertNotEquals("PAUSED", stateOf(s));
     }
-    assertEquals(retractAtPause, retractElapsed(s), EPS, "pause time never counts toward retract");
-
-    // Recovery: the first loop without injection re-reads the on-target sim value and the volley
-    // auto-resumes once the full stable window is re-earned.
-    assertTrue(stepUntilFeeding(s, 15), "auto-resumed after the measurement recovered");
-    assertTrue(retractElapsed(s) > retractAtPause, "feeding time counts toward retract again");
+    assertTrue(retractElapsed(s) > retractBeforeSag, "feeding time keeps advancing retract");
     s.end(true);
   }
 
@@ -255,42 +248,25 @@ class ShootingMeasurementFaultTest {
   }
 
   @Test
-  void measuredDrumSagWithdrawsCurrentFeedUntilRecovery() throws Exception {
+  void measuredDrumSagDoesNotWithdrawCurrentFeedAfterGateRelease() throws Exception {
     Shooting s = new Shooting(true);
     s.initialize();
     assertTrue(stepUntilCurrentFeeding(s, 30), "energy-save mode feeding at 50 A");
     assertEquals(MotorIO.ControlMode.CURRENT, Indexer.mInstance.getControlMode());
 
     double targetBefore = Drum.mInstance.getVelocitySetpointRotPerSec();
-    injectDrumVelocity(DRUM_SAG_ROTPS);
-    assertTrue(
-        Math.abs(Drum.mInstance.getVelocityRotPerSec() - targetBefore)
-            >= ShootingConstants.SHOOTER_VELOCITY_TOLERANCE_ROTPS,
-        "the injected current-mode drum fault is outside the readiness tolerance");
-    step(s);
-    assertNotEquals(
-        MotorIO.ControlMode.CURRENT,
-        Feeder.mInstance.getControlMode(),
-        "drum sag withdraws the feeder 50 A request on the detection loop");
-    assertEquals(0.0, Feeder.mInstance.getCurrentSetpointAmps(), EPS, "no current request left");
-    assertNotEquals(MotorIO.ControlMode.CURRENT, Indexer.mInstance.getControlMode());
-    assertEquals(0.0, Indexer.mInstance.getCurrentSetpointAmps(), EPS);
-    assertEquals(targetBefore, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
-
     for (int i = 0; i < 10; i++) {
       injectDrumVelocity(DRUM_SAG_ROTPS);
+      assertTrue(
+          Math.abs(Drum.mInstance.getVelocityRotPerSec() - targetBefore)
+              >= ShootingConstants.SHOOTER_VELOCITY_TOLERANCE_ROTPS,
+          "the injected current-mode drum fault is outside the readiness tolerance");
       step(s);
-      assertFalse(
-          isCurrentFeeding(), "sustained sag keeps the current request withdrawn, loop " + i);
+      assertTrue(
+          isCurrentFeeding(), "a post-release drum sag must keep the 50 A request, loop " + i);
+      assertEquals(50.0, Indexer.mInstance.getCurrentSetpointAmps(), EPS);
+      assertEquals(targetBefore, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
     }
-
-    // Recovery restores the 50 A request once the stable window is re-earned.
-    boolean resumed = false;
-    for (int i = 0; i < 15 && !resumed; i++) {
-      step(s);
-      resumed = isCurrentFeeding();
-    }
-    assertTrue(resumed, "current feed restored after the measurement recovered");
     s.end(true);
   }
 
@@ -346,37 +322,37 @@ class ShootingMeasurementFaultTest {
   }
 
   @Test
-  void accumulatedWaitSurvivesBriefFeedingRecovery() throws Exception {
-    // ADR 0021: the force-feed timeout ACCUMULATES across the whole press. A brief return to
-    // speed that feeds for ~0.4 s must not reset the wait — otherwise stuttering speed keeps
-    // postponing the fallback forever (the 2026-10-27 acceptance reproduction).
+  void accumulatedWaitSurvivesFeedingAndZeroPause() throws Exception {
+    // Waiting before the first normal release must not be cleared by a brief volley or by a later
+    // operator-requested 0% pause. Otherwise a recovery after that pause would wait another 3 s.
     Shooting s = new Shooting(false);
     s.initialize();
-    assertTrue(stepUntilFeeding(s, 30), "reached SHOOT");
-
-    // Segment 1: below speed for 1.8 s — held, wait accumulates to 1.8 s.
     for (int i = 0; i < 90; i++) {
       injectDrumVelocity(DRUM_SAG_ROTPS);
       step(s);
-      assertEquals(0.0, feederSetpoint(), EPS, "segment 1 held, loop " + i);
+      assertEquals(0.0, feederSetpoint(), EPS, "initial wait accumulates, loop " + i);
     }
 
-    // Brief recovery: remove the injection, the gate re-opens and feeds ~0.4 s.
-    assertTrue(stepUntilFeeding(s, 15), "brief recovery feeds");
+    assertTrue(stepUntilFeeding(s, 15), "brief normal release feeds");
     for (int i = 0; i < 20; i++) {
       step(s);
-      assertTrue(isFeeding(), "still feeding during the brief recovery, loop " + i);
+      assertTrue(isFeeding(), "brief volley, loop " + i);
     }
 
-    // Segment 2: below speed again for 1.8 s. Accumulated wait is now 3.6 s > 3 s, so the volley
-    // must force-feed during this segment rather than holding for another full timeout.
+    DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
+    for (int i = 0; i < 20; i++) {
+      step(s);
+      assertEquals(0.0, feederSetpoint(), EPS, "0% pause, loop " + i);
+    }
+
+    DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
     boolean forceFed = false;
     for (int i = 0; i < 95 && !forceFed; i++) {
       injectDrumVelocity(DRUM_SAG_ROTPS);
       step(s);
       forceFed = isFeeding();
     }
-    assertTrue(forceFed, "accumulated 1.8 + 1.8 s of waiting must trigger force-feed");
+    assertTrue(forceFed, "the original 1.8 s wait survives feeding and the 0% pause");
     s.end(true);
   }
 

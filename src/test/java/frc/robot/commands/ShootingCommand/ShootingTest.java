@@ -40,10 +40,10 @@ import org.littletonrobotics.junction.networktables.LoggedNetworkNumber;
  * command touched any of them it would throw on the null Drive.mInstance.
  *
  * <p>The instant-setpoint sim snaps Drum/Hood to their setpoints on the next periodic, so after a
- * press or a dashboard edit the flywheel reaches its new target within a loop or two. Feeding is
- * gated on that measured speed plus the 0.15 s stable window: a press from a stopped drum feeds
- * only after spin-up, and a mid-volley edit or sag pauses the feed path on the detection loop and
- * auto-resumes once the shot re-earns the stable window. The hood never gates feeding.
+ * press or a dashboard edit the flywheel reaches its new target within a loop or two. Initial
+ * feeding is gated on that measured speed plus the 0.15 s stable window. After release, target
+ * edits and speed sag must not interrupt feeding; 0% and UNJAM still stop and re-gate the volley.
+ * The hood never gates feeding.
  */
 class ShootingTest {
   private static final double EPS = 1e-6;
@@ -287,32 +287,28 @@ class ShootingTest {
   }
 
   @Test
-  void midVolleyTargetChangePausesBriefly() throws Exception {
+  void midVolleyTargetChangeKeepsFeedingAndTracksTarget() throws Exception {
     Shooting shooting = new Shooting(false);
     shooting.initialize();
     assertTrue(stepUntilFeeding(shooting, 30), "reached SHOOT at 100%");
 
     double retractElapsedBeforeEdit = retractElapsed(shooting);
-    // New drum target 33.5 rot/s vs the still-measured 67: not ready until the sim snaps, and the
-    // pause freezes the retract timer for that stretch.
     DashboardControlsTestUtil.set(FLYWHEEL, 50.0);
     step(shooting);
-    assertEquals(0.0, feederSetpoint(), EPS, "feeding paused on the detection loop");
-    assertEquals(
-        retractElapsedBeforeEdit,
-        retractElapsed(shooting),
-        EPS,
-        "the pause freezes the retract timer");
+    assertTrue(isFeeding(), "a nonzero target edit must not interrupt an already released volley");
+    assertTrue(
+        retractElapsed(shooting) > retractElapsedBeforeEdit,
+        "feeding continues advancing the retract timer");
     assertEquals(
         0.5 * DrumConstants.MaxShotVelocity,
         Drum.mInstance.getVelocitySetpointRotPerSec(),
         EPS,
-        "the pause loop already drives the drum to the new target");
+        "the same loop drives the drum to the new target");
 
-    assertTrue(stepUntilFeeding(shooting, 15), "auto-resumed at the new target");
-    assertTrue(
-        retractElapsed(shooting) > retractElapsedBeforeEdit,
-        "feeding time after the resume counts toward the retract delay again");
+    for (int i = 0; i < 10; i++) {
+      step(shooting);
+      assertTrue(isFeeding(), "feeding continues while the drum tracks the new target, loop " + i);
+    }
     shooting.end(true);
   }
 

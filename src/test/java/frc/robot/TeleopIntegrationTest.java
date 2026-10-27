@@ -767,7 +767,7 @@ class TeleopIntegrationTest {
   }
 
   // ---------------------------------------------------------------------------
-  // Immediate feed through the real bindings, with no vision or readiness gate.
+  // Startup-gated feed through the real bindings, with no vision or pose input.
   // ---------------------------------------------------------------------------
 
   @Test
@@ -938,7 +938,7 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void portOneRbNonzeroTargetChangePausesBriefly() {
+  void portOneRbNonzeroTargetChangeKeepsFeedingAndTracksTargets() {
     startFeedingForSetup(1, BUTTON_RB);
     DashboardControlsTestUtil.set(FLYWHEEL, 50.0);
     DashboardControlsTestUtil.set(HOOD, 100.0);
@@ -950,19 +950,20 @@ class TeleopIntegrationTest {
         EPS,
         "the edit loop still measures the old drum speed");
     assertEquals(0.0, Hood.mInstance.getPositionRot(), EPS, "hood has not moved yet");
-    // The old measurement sits outside the new 33.5 rot/s target: the gate pauses on this loop and
-    // already commands the new targets.
-    refreshShotRequests();
-    assertFeedPathStopped();
-    assertEquals(
-        0.5 * DrumConstants.MaxShotVelocity, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
-    assertEquals(HoodConstants.MaxAngleDeg / 360.0, Hood.mInstance.getPositionSetpointRot(), EPS);
-
-    assertTrue(stepUntilFeeding(25), "auto-resumes at the new target after the stable window");
     refreshShotRequests();
     assertVelocityFeed(
         ShootingConstants.IndexerRotpsTunable.getAsDouble(),
         ShootingConstants.FeederRotpsTunable.getAsDouble());
+    assertEquals(
+        0.5 * DrumConstants.MaxShotVelocity, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+    assertEquals(HoodConstants.MaxAngleDeg / 360.0, Hood.mInstance.getPositionSetpointRot(), EPS);
+
+    for (int i = 0; i < 10; i++) {
+      stepRobot();
+      assertVelocityFeed(
+          ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+          ShootingConstants.FeederRotpsTunable.getAsDouble());
+    }
     release(1, BUTTON_RB);
     settle();
   }
