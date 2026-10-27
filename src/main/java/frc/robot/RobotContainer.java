@@ -6,8 +6,10 @@ import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.FunctionalCommand;
+import edu.wpi.first.wpilibj2.command.Subsystem;
 import frc.robot.commands.DriveCommands.DriveCommands;
 import frc.robot.commands.HoodZeroCommand.HoodZeroCommand;
 import frc.robot.commands.IntakeCommand.IntakeCommand;
@@ -67,27 +69,25 @@ public class RobotContainer {
   // Port 1 is the preferred demo controller; port 0 retains the full original controls.
   private final DriverControls controls = new DriverControls();
 
-  // Latched intake (2026-10-26): LT is press-on / press-off instead of hold-to-run. The latch
-  // state is exactly "latchedIntake.isScheduled()" — the onlyWhile guard tears it down when its
-  // source port disconnects or loses priority, and the scheduler cancels it on disable, so
-  // neither resumes by itself; the operator presses LT again. intakeLatchSource records which
-  // port owns the running latch for that guard.
+  // Latched intake (2026-10-26; intent model since 2026-10-27, decisions 0016→0022→0023): LT is
+  // strictly press-on / press-off. The latch is an INTENT (intakeLatchDesired), independent of
+  // whether the intake command is currently scheduled: mechanism commands (Shooting, Manual, the
+  // homing retract) merely BORROW the shared subsystems — when they finish, the poll reschedules
+  // the intake and collection resumes by itself. Only these clear the intent: a second LT press,
+  // an LB outtake press, a robot disable, and the source pad disconnecting/losing priority —
+  // those never resume on their own; the operator presses LT again.
   //
-  // Edge semantics (2026-10-27 acceptance fix, ADR 0016): the toggle is driven by REAL button
-  // edges polled every loop — not by a "has control AND pressed" trigger, whose condition
-  // regaining truth masquerades as a press when control returns to a pad still holding LT.
-  // A port whose latch was torn down while its LT was held must first OBSERVE a release before
-  // its next press counts (intakeAwaitingRelease); while a pad is disconnected its button reads
-  // are garbage, so its edge state is frozen and the reconnect loop only resynchronizes the
-  // baseline — a hold that spanned the disconnect is not a new press either.
+  // Edge semantics (2026-10-27, decision 0022): the toggle is driven by REAL button edges polled
+  // every loop — not by a "has control AND pressed" trigger, whose condition regaining truth
+  // masquerades as a press. While a pad is disconnected its button reads are garbage, so its
+  // edge state is frozen and the reconnect loop only resynchronizes the baseline — a hold that
+  // spanned the disconnect is not a new press either.
+  private boolean intakeLatchDesired;
   private int intakeLatchSource = -1;
   private final Command latchedIntake =
       new IntakeCommand().onlyWhile(() -> controls.activePort() == intakeLatchSource);
   private final boolean[] intakeHeldLastLoop = new boolean[2];
   private final boolean[] intakeConnectedLastLoop = new boolean[2];
-  private final boolean[] intakeAwaitingRelease = new boolean[2];
-  private boolean intakeLatchWasScheduled;
-  private int lastIntakeLatchSource = -1;
 
   /** The container for the robot. Contains subsystems, OI devices, and commands. */
   public RobotContainer() {
@@ -254,34 +254,67 @@ public class RobotContainer {
   }
 
   /**
-   * Toggles the latched intake from a REAL LT press on {@code port}. Runs from the poll loop (not
-   * from a scheduler trigger): schedule() and cancel() here take the scheduler's immediate path
-   * because the poll runs outside the scheduler's execute phase, and isScheduled() reflects the
-   * latch the moment this returns. A toggle while disabled is dropped by the scheduler before the
-   * latch schedules, so nothing latches across a disable.
+   * Toggles the latched-intake INTENT from a REAL LT press on {@code port} (decision 0023). The
+   * intent, not the command's schedule state, is the latch. Turning it ON schedules the intake
+   * immediately — a fresh press preempts whatever mechanism command is currently borrowing the
+   * subsystems (the operator asked for intake NOW); if a conflict later interrupts the running
+   * command, the poll reschedules it as soon as the subsystems free up, so collection resumes on
+   * its own. Turning it OFF cancels a running command. Runs from the poll loop outside the
+   * scheduler's execute phase, so schedule()/cancel() take the immediate path.
    */
-  private void toggleLatchedIntake(int port) {
-    if (latchedIntake.isScheduled()) {
-      latchedIntake.cancel();
-      intakeLatchSource = -1;
+  private void toggleIntakeLatchIntent(int port) {
+    if (intakeLatchDesired) {
+      clearIntakeLatchIntent();
     } else {
+      intakeLatchDesired = true;
       intakeLatchSource = port;
-      lastIntakeLatchSource = port;
       latchedIntake.schedule();
       if (!latchedIntake.isScheduled()) {
-        intakeLatchSource = -1; // scheduler dropped it (e.g. disabled): not latched
+        // Scheduler dropped it (e.g. disabled): the intent stays off.
+        intakeLatchDesired = false;
+        intakeLatchSource = -1;
       }
     }
+  }
+
+  /** Drops the intent and stops a running intake command, if any. */
+  private void clearIntakeLatchIntent() {
+    intakeLatchDesired = false;
+    intakeLatchSource = -1;
+    if (latchedIntake.isScheduled()) {
+      latchedIntake.cancel();
+    }
+  }
+
+  /** True when no other command owns any subsystem the intake command requires. */
+  private boolean intakeRequirementsAreFree() {
+    for (Subsystem requirement : latchedIntake.getRequirements()) {
+      Command owner = CommandScheduler.getInstance().requiring(requirement);
+      if (owner != null && owner != latchedIntake) {
+        return false;
+      }
+    }
+    return true;
   }
 
   /**
    * Real-edge poll for the latched intake — call every robot loop after the scheduler runs. See the
    * latched-intake field note for the semantics: only a physical press observed while the pad is
-   * connected AND in control toggles the latch; a latch torn down while LT was held (priority loss,
-   * disconnect, disable, LB, interruption) requires an observed release first; a disconnect freezes
-   * the edge state and a reconnect only resynchronizes it.
+   * connected, in control, and enabled toggles the intent; a disconnect freezes the edge state and
+   * the reconnect loop only resynchronizes it. Disable, disconnect, and priority loss clear the
+   * intent outright (never resume on their own — press LT again). While the intent is on, the poll
+   * keeps the intake command scheduled whenever its subsystems are free, so a finished
+   * Shooting/Manual/homing command resumes collection automatically.
    */
   public void pollIntakeLatch() {
+    if (intakeLatchDesired
+        && (DriverStation.isDisabled()
+            || intakeLatchSource < 0
+            || !DriverStation.isJoystickConnected(intakeLatchSource)
+            || controls.activePort() != intakeLatchSource)) {
+      clearIntakeLatchIntent();
+    }
+
     for (int port = DriverControls.FULL_PORT; port <= DriverControls.DEMO_PORT; port++) {
       boolean connected = DriverStation.isJoystickConnected(port);
       boolean connectedLastLoop = intakeConnectedLastLoop[port];
@@ -299,42 +332,30 @@ public class RobotContainer {
       }
       boolean rising = held && !intakeHeldLastLoop[port];
       intakeHeldLastLoop[port] = held;
-      if (!held) {
-        intakeAwaitingRelease[port] = false; // a release observed while connected clears the gate
-      }
-      if (rising
-          && !intakeAwaitingRelease[port]
-          && controls.activePort() == port
-          && !DriverStation.isDisabled()) {
-        toggleLatchedIntake(port);
+      if (rising && controls.activePort() == port && !DriverStation.isDisabled()) {
+        toggleIntakeLatchIntent(port);
       }
     }
 
-    if (intakeLatchWasScheduled && !latchedIntake.isScheduled() && lastIntakeLatchSource >= 0) {
-      // The latch was torn down this loop (onlyWhile, disable, LB, interruption — or this poll's
-      // own toggle-off, which is harmless). If the source pad still holds LT, require a release.
-      if (intakeHeldLastLoop[lastIntakeLatchSource]) {
-        intakeAwaitingRelease[lastIntakeLatchSource] = true;
-      }
+    // Best-effort scheduling while the intent is on. Scheduling blindly would INTERRUPT a
+    // conflicting command (WPILib default), so only schedule when every required subsystem is
+    // free; while Shooting/Manual/homing own them the intake stays yielded, and the first free
+    // loop resumes collection.
+    if (intakeLatchDesired && !latchedIntake.isScheduled() && intakeRequirementsAreFree()) {
+      latchedIntake.schedule();
     }
-    intakeLatchWasScheduled = latchedIntake.isScheduled();
   }
 
   /**
-   * An outtake press takes over the feed path: cancel the latched intake in the button poll so its
-   * end() zero-writes land BEFORE the execute-phase -3 V reverse recompute of
-   * applyReverseFeedDesired. Cancelling from inside that recompute instead would defer the latch's
-   * end() to loop end (WPILib 2026 queues in-loop cancels into m_toCancelCommands, processed after
-   * the execute phase) and the zeros would overwrite the fresh reverse outputs.
+   * An outtake press takes over the feed path AND clears the latch intent (one of the three
+   * intent-killers besides the second LT press): cancel the command in the button poll so its end()
+   * zero-writes land BEFORE the execute-phase -3 V reverse recompute of applyReverseFeedDesired.
+   * Cancelling from inside that recompute instead would defer the latch's end() to loop end (WPILib
+   * 2026 queues in-loop cancels into m_toCancelCommands, processed after the execute phase) and the
+   * zeros would overwrite the fresh reverse outputs.
    */
   private Command stopLatchedIntakeCommand() {
-    return Commands.runOnce(
-        () -> {
-          if (latchedIntake.isScheduled()) {
-            latchedIntake.cancel();
-            intakeLatchSource = -1;
-          }
-        });
+    return Commands.runOnce(this::clearIntakeLatchIntent);
   }
 
   private Command reverseFeedReleaseCommand() {

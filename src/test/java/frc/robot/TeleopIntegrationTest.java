@@ -1922,6 +1922,74 @@ class TeleopIntegrationTest {
   }
 
   @Test
+  void shootingConflictDoesNotCancelTheIntakeLatchIntent() {
+    // The operator's rule (2026-10-27): LT is strictly press-on / press-off. Shooting merely
+    // borrows the subsystems — after the shot ends, collection must resume on its own because
+    // the latch INTENT is still on. Only another LT press (or outtake/disable/disconnect) may
+    // end it.
+    connect(0);
+    pressIntakeToggle(0); // first press: latch on
+    boolean running = false;
+    for (int i = 0; i < 10 && !running; i++) {
+      stepRobot();
+      running = intakeRollerRunning();
+    }
+    assertTrue(running, "intake latched on");
+
+    press(0, BUTTON_RB); // Shooting requires the same subsystems: legally interrupts Intake
+    for (int i = 0; i < 5; i++) {
+      stepRobot();
+      assertFalse(intakeRollerRunning(), "intake yields while Shooting owns the subsystems");
+    }
+
+    release(0, BUTTON_RB);
+    running = false;
+    for (int i = 0; i < 10 && !running; i++) {
+      stepRobot();
+      running = intakeRollerRunning();
+    }
+    assertTrue(running, "intake resumes by itself after the shot — the intent survived");
+
+    pressIntakeToggle(0); // second press: latch off
+    for (int i = 0; i < 5; i++) {
+      stepRobot();
+      assertFalse(intakeRollerRunning(), "second press stops intake, loop " + i);
+    }
+  }
+
+  @Test
+  void manualShootConflictDoesNotCancelTheIntakeLatchIntent() {
+    // X (Manual, port 0 only) borrows the same subsystems; the latch intent survives it too.
+    connect(0);
+    pressIntakeToggle(0);
+    boolean running = false;
+    for (int i = 0; i < 10 && !running; i++) {
+      stepRobot();
+      running = intakeRollerRunning();
+    }
+    assertTrue(running, "intake latched on");
+
+    press(0, BUTTON_X); // Manual interrupts Intake
+    for (int i = 0; i < 5; i++) {
+      stepRobot();
+      assertFalse(intakeRollerRunning(), "intake yields while Manual runs");
+    }
+    release(0, BUTTON_X);
+
+    running = false;
+    for (int i = 0; i < 10 && !running; i++) {
+      stepRobot();
+      running = intakeRollerRunning();
+    }
+    assertTrue(running, "intake resumes after Manual ends");
+    pressIntakeToggle(0); // stop it again
+    for (int i = 0; i < 5; i++) {
+      stepRobot();
+      assertFalse(intakeRollerRunning(), "second press stops intake, loop " + i);
+    }
+  }
+
+  @Test
   void intakeLatchDoesNotRestartWhenControlReturnsWhileHeld() {
     // ADR 0016: control returning to a pad that still holds LT is NOT a new press — the latch
     // must stay down until the operator releases and presses LT again (2026-10-27 acceptance
