@@ -193,32 +193,18 @@ class ManualTest {
   }
 
   @Test
-  void measuredDrumSagPausesSameLoopAndAutoResumes() throws Exception {
+  void measuredDrumSagDoesNotInterruptFeedAfterGateRelease() throws Exception {
     Manual manual = new Manual();
     manual.initialize();
     stepUntilFeeding(manual, 50);
     double drumTarget = Drum.mInstance.getVelocitySetpointRotPerSec();
 
-    injectDrumVelocity(0.0);
-    step(manual);
-    assertEquals(
-        0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS, "sag stops the feed same-loop");
-    assertEquals(0.0, Indexer.mInstance.getVelocitySetpointRotPerSec(), EPS);
-    assertEquals(drumTarget, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
-
     for (int i = 0; i < 5; i++) {
       injectDrumVelocity(0.0);
       step(manual);
-      assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS, "sag loop " + i);
+      assertManualFeedPath();
+      assertEquals(drumTarget, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
     }
-
-    // Recovery (no injection re-reads the on-target sim value) auto-resumes after the window.
-    for (int i = 0; i < 5; i++) {
-      step(manual);
-      assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS, "window loop " + i);
-    }
-    stepUntilFeeding(manual, 15);
-    assertManualFeedPath();
     manual.end(true);
   }
 
@@ -239,27 +225,23 @@ class ManualTest {
   }
 
   @Test
-  void drumTargetChangePausesBrieflyThenResumes() {
+  void drumTargetChangeKeepsFeedingAndTracksTarget() {
     Manual manual = new Manual();
     manual.initialize();
     stepUntilFeeding(manual, 50);
 
-    // New drum target 25 rot/s vs the still-measured 50: the edit loop pauses, and the feed
-    // resumes at the new target once the stable window is re-earned.
     DashboardControlsTestUtil.set(FLYWHEEL, 50.0);
     step(manual);
-    assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS);
-    assertEquals(
-        0.5 * ManualConstants.ShooterRotpsTunable.getAsDouble(),
-        Drum.mInstance.getVelocitySetpointRotPerSec(),
-        EPS);
-
-    stepUntilFeeding(manual, 25);
     assertManualFeedPath();
     assertEquals(
         0.5 * ManualConstants.ShooterRotpsTunable.getAsDouble(),
         Drum.mInstance.getVelocitySetpointRotPerSec(),
         EPS);
+
+    for (int i = 0; i < 10; i++) {
+      step(manual);
+      assertManualFeedPath();
+    }
     manual.end(true);
   }
 
@@ -317,32 +299,37 @@ class ManualTest {
   }
 
   @Test
-  void accumulatedWaitSurvivesBriefFeedingRecovery() throws Exception {
-    // ADR 0021: the timeout accumulates across the whole press; a brief feeding recovery must
-    // not reset it (the 2026-10-27 acceptance reproduction applies to Manual too).
+  void accumulatedWaitSurvivesFeedingAndZeroPause() throws Exception {
+    // Waiting before the first normal release must not be cleared by a brief volley or by a later
+    // operator-requested 0% pause. Otherwise a recovery after that pause would wait another 3 s.
     Manual manual = new Manual();
     manual.initialize();
-    stepUntilFeeding(manual, 50);
-
-    for (int i = 0; i < 90; i++) { // segment 1: below speed 1.8 s
+    for (int i = 0; i < 90; i++) {
       injectDrumVelocity(0.0);
       step(manual);
-      assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS, "seg 1 loop " + i);
+      assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS, "wait loop " + i);
     }
 
-    stepUntilFeeding(manual, 15); // brief recovery feeds (fails the test if it never does)
-    for (int i = 0; i < 20; i++) { // feed ~0.4 s
+    stepUntilFeeding(manual, 15);
+    for (int i = 0; i < 20; i++) {
       step(manual);
-      assertTrue(Feeder.mInstance.getVelocitySetpointRotPerSec() > 0, "brief recovery loop " + i);
+      assertTrue(Feeder.mInstance.getVelocitySetpointRotPerSec() > 0, "brief volley loop " + i);
     }
 
+    DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
+    for (int i = 0; i < 20; i++) {
+      step(manual);
+      assertEquals(0.0, Feeder.mInstance.getVelocitySetpointRotPerSec(), EPS, "0% loop " + i);
+    }
+
+    DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
     boolean forceFed = false;
-    for (int i = 0; i < 95 && !forceFed; i++) { // segment 2: below speed again 1.8 s
+    for (int i = 0; i < 95 && !forceFed; i++) {
       injectDrumVelocity(0.0);
       step(manual);
       forceFed = Feeder.mInstance.getVelocitySetpointRotPerSec() > 0;
     }
-    assertTrue(forceFed, "accumulated 1.8 + 1.8 s of waiting must trigger force-feed");
+    assertTrue(forceFed, "the original 1.8 s wait survives feeding and the 0% pause");
     manual.end(true);
   }
 

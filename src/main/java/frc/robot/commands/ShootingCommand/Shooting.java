@@ -20,18 +20,17 @@ import org.littletonrobotics.junction.Logger;
 
 /**
  * Demo shooting: spins the drum and sets the hood from the Elastic Flywheel Speed Limit (%) and
- * Hood Angle (%) entries, then feeds only once the flywheel is actually at speed. No aiming,
- * vision, or pose/distance input is used; the drivetrain is not required.
+ * Hood Angle (%) entries, then gates initial feeding on measured flywheel speed. No aiming, vision,
+ * or pose/distance input is used; the drivetrain is not required.
  *
- * <p>The flywheel-speed gate runs continuously through the whole volley, not just during SPIN_UP,
- * via the shared {@link ShotReadiness} rule: drum within {@link
+ * <p>The startup gate uses the shared {@link ShotReadiness} rule: drum within {@link
  * ShootingConstants#SHOOTER_VELOCITY_TOLERANCE_ROTPS} of the limited target, held for the {@link
- * ShootingConstants#READY_DEBOUNCE_SEC} stable window. The hood never gates feeding — it stays a
- * logged diagnostic — so an unreachable hood target cannot hold a hopper full of balls in the
- * indexer. Losing speed mid-volley pauses feeding on that very loop (the feed-path motors stop
- * immediately while the drum and hood keep being driven to target), and regaining stable readiness
- * auto-resumes the volley exactly where it left off, without the driver releasing the button. A
- * pause freezes the retract timer mid-count, so paused time never counts toward the retract delay.
+ * ShootingConstants#READY_DEBOUNCE_SEC} stable window. Once that permit is earned, ordinary
+ * mid-volley speed sag and nonzero target edits do not interrupt feeding, avoiding a load-induced
+ * pause/recovery cycle on every ball. A 0% limit still stops the feed path immediately and revokes
+ * the permit, so a positive value must earn the window again unless force-feed is active. The hood
+ * never gates feeding — it stays a logged diagnostic. Pauses for 0% and UNJAM freeze the retract
+ * timer mid-count.
  *
  * <p>Force-feed timeout: if the gate still has not released feeding after {@link
  * DashboardControls#getForceFeedTimeoutSec} (default 3 s, Elastic-persisted) of accumulated waiting
@@ -90,6 +89,9 @@ public class Shooting extends Command {
   // gate latches off so balls always come out — until the button is released and re-pressed.
   private final Timer gateWaitTimer = new Timer();
   private boolean forceFeedActive;
+  // Whether this startup cycle has earned feed permission. Normal mid-volley speed sag does not
+  // revoke it; 0% and UNJAM do, so those recovery paths must earn it again unless force-feed is on.
+  private boolean feedGateReleased;
 
   public Shooting(boolean isEnergySave) {
     addRequirements(
@@ -111,6 +113,7 @@ public class Shooting extends Command {
     gateWaitTimer.stop();
     gateWaitTimer.reset();
     forceFeedActive = false;
+    feedGateReleased = false;
     readiness.reset();
     resetJamDetection();
   }
@@ -132,10 +135,9 @@ public class Shooting extends Command {
   }
 
   /**
-   * Pauses the wait accumulator WITHOUT clearing it (2026-10-27 acceptance fix): the timeout is
-   * accumulated across the whole press, so a brief feeding recovery must not reset the wait —
-   * stuttering speed would otherwise keep postponing the fallback forever. Only initialize() resets
-   * the accumulator (a fresh press).
+   * Pauses the wait accumulator WITHOUT clearing it: a brief feeding stretch, 0% hold, or UNJAM
+   * must not erase waiting already accumulated during startup or an earlier recovery. Only
+   * initialize() resets the accumulator (a fresh press).
    */
   private void pauseGateWait() {
     gateWaitTimer.stop();
@@ -217,6 +219,7 @@ public class Shooting extends Command {
       retractTimer.stop();
     }
     readiness.reset();
+    feedGateReleased = false;
     state = States.UNJAM;
     unjamTimer.restart();
     writeUnjamOutputs();
@@ -285,15 +288,7 @@ public class Shooting extends Command {
     // A 0% limit always pauses, even after the force-feed timeout: the operator is deliberately
     // holding the drum stopped.
     if (lastEvaluation.flywheelZero()) {
-      enterPause(States.SHOOT);
-      holdPauseOutputs();
-      holdJamNotDetected();
-      return;
-    }
-    // Losing flywheel speed mid-volley pauses feeding on this very loop — the feed path stops now,
-    // not next loop; PAUSED auto-resumes the volley once the shot is stable-ready again. After the
-    // force-feed timeout latches, the speed gate no longer pauses this volley.
-    if (!forceFeedActive && !lastEvaluation.rawReady()) {
+      feedGateReleased = false;
       enterPause(States.SHOOT);
       holdPauseOutputs();
       holdJamNotDetected();
@@ -314,12 +309,7 @@ public class Shooting extends Command {
       return;
     }
     if (lastEvaluation.flywheelZero()) {
-      enterPause(States.RETRACT);
-      holdPauseOutputs();
-      holdJamNotDetected();
-      return;
-    }
-    if (!forceFeedActive && !lastEvaluation.rawReady()) {
+      feedGateReleased = false;
       enterPause(States.RETRACT);
       holdPauseOutputs();
       holdJamNotDetected();
@@ -359,26 +349,28 @@ public class Shooting extends Command {
     }
   }
 
-  /** Hold at 0% or while the flywheel is below speed, then resume the remembered feeding state. */
+  /** Hold at 0% or while a recovery path must re-earn the startup gate. */
   private void paused() {
     if (lastEvaluation.flywheelZero()) {
+      feedGateReleased = false;
       trackGateWait(false); // a 0% limit never accumulates toward the force-feed timeout
       holdPauseOutputs();
       holdJamNotDetected();
       return;
     }
-    if (!forceFeedActive && !lastEvaluation.stableReady()) {
-      // Below speed at a positive limit: accumulate the wait; once the timeout elapses the latch
-      // closes and the volley resumes feeding on this very loop.
+    if (!forceFeedActive && !feedGateReleased && !lastEvaluation.stableReady()) {
+      // A recovery path still waiting at a positive limit accumulates toward the same timeout.
       trackGateWait(true);
       holdPauseOutputs();
       holdJamNotDetected();
       if (forceFeedActive) {
+        feedGateReleased = true;
         resumeFromPause();
       }
       return;
     }
 
+    feedGateReleased = true;
     resumeFromPause();
   }
 
@@ -404,6 +396,7 @@ public class Shooting extends Command {
     holdJamNotDetected();
 
     if (lastEvaluation.stableReady()) {
+      feedGateReleased = true;
       state = States.SHOOT;
       return;
     }
@@ -411,6 +404,7 @@ public class Shooting extends Command {
     // it elapses the volley starts feeding even though the flywheel never reached its target.
     trackGateWait(!lastEvaluation.flywheelZero());
     if (forceFeedActive) {
+      feedGateReleased = true;
       state = States.SHOOT;
     }
   }

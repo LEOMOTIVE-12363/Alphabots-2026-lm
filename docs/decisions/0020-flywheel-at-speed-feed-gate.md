@@ -5,6 +5,8 @@
 - Supersedes: [0011 — Immediate feed with only flywheel-zero gating](0011-immediate-feed-only-flywheel-zero-gate.md)
   for the immediate-feed policy; restores the 0007-era gate with the Hood
   condition removed
+- Amended by: [0024 — Startup-only feed gate](0024-startup-only-feed-gate.md)
+  (continuous mid-volley gating removed; startup and 0%/UNJAM recovery gates retained)
 
 ## Context
 

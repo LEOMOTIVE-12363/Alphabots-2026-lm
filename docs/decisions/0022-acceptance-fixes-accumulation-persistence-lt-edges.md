@@ -5,6 +5,8 @@
 - Amends: [0021 — Widen speed tolerance + force-feed timeout](0021-widen-tolerance-force-feed-timeout.md)
   (accumulation semantics) and [0016 — Latched intake toggle](0016-latched-intake-toggle.md)
   (edge implementation, honoring its original no-self-resume promise)
+- Amended by: [0024 — Startup-only feed gate](0024-startup-only-feed-gate.md)
+  (timeout accumulation retained; ordinary post-release sag no longer creates waiting)
 
 ## Context
 

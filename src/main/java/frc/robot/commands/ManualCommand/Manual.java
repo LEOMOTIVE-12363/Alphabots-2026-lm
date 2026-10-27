@@ -16,13 +16,13 @@ import org.littletonrobotics.junction.Logger;
 
 /**
  * X-button fixed-setpoint shot path. Every execute drives the drum and hood to the current Manual
- * targets; feeding runs only while the flywheel is actually at the Manual speed target (stable
- * after the 0.15 s window) and the flywheel limit is positive. The hood never gates feeding. A zero
- * flywheel limit or a below-speed measurement stops only the feed path for that loop, and feeding
- * resumes by itself once the shot is stable-ready again. The same force-feed timeout as Shooting
- * applies: waiting at a positive limit for the configured timeout (default 3 s, Elastic-persisted
- * via DashboardControls) latches the speed gate off for the rest of the press, so balls always come
- * out.
+ * targets. Initial feeding waits for the measured Manual speed target to hold the 0.15 s stable
+ * window with a positive flywheel limit; after that permit is earned, mid-volley speed sag and
+ * nonzero target edits do not interrupt feeding. A 0% limit stops the feed path immediately and
+ * requires a fresh speed window on recovery unless force-feed is active. The hood never gates
+ * feeding. The same force-feed timeout as Shooting applies: waiting at a positive limit for the
+ * configured timeout (default 3 s, Elastic-persisted via DashboardControls) latches the speed gate
+ * off for the rest of the press, so balls always come out.
  */
 public class Manual extends Command {
   // Shared readiness rule with this command's own debounce, so a fresh press re-earns the full
@@ -32,6 +32,9 @@ public class Manual extends Command {
   // Force-feed timeout accumulator (positive-limit waiting only) and latch, reset per press.
   private final Timer gateWaitTimer = new Timer();
   private boolean forceFeedActive;
+  // Normal mid-volley speed sag must not retract an already earned startup permit. A 0% edit does
+  // revoke it, so recovery from the operator's deliberate stop must pass the speed window again.
+  private boolean feedGateReleased;
 
   public Manual() {
     addRequirements(
@@ -49,6 +52,7 @@ public class Manual extends Command {
     gateWaitTimer.stop();
     gateWaitTimer.reset();
     forceFeedActive = false;
+    feedGateReleased = false;
   }
 
   @Override
@@ -60,12 +64,8 @@ public class Manual extends Command {
             ManualConstants.ShooterRotpsTunable.getAsDouble(),
             ManualConstants.HoodDegTunable.getAsDouble() / 360.);
 
-    // stableReady drops on the first below-speed sample (same-loop stop) and only turns true after
-    // the full 0.15 s window, so the entry is debounced while the exit stays immediate. Waiting at
-    // a positive limit accumulates toward the force-feed timeout (0% never counts and always stops
-    // the feed path, even after the latch); once the timeout elapses the gate latches off for the
-    // rest of the press.
     if (lastEvaluation.flywheelZero()) {
+      feedGateReleased = false;
       gateWaitTimer.stop();
       IntakeRoller.mInstance.setV(0);
       Indexer.mInstance.setV(0);
@@ -74,7 +74,7 @@ public class Manual extends Command {
       OperatorStatus.reportFeedDecision(false, ShotReadiness.REASON_FLYWHEEL_ZERO);
       return;
     }
-    if (!lastEvaluation.stableReady()) {
+    if (!forceFeedActive && !feedGateReleased && !lastEvaluation.stableReady()) {
       gateWaitTimer.start();
       if (gateWaitTimer.hasElapsed(DashboardControls.getForceFeedTimeoutSec())) {
         forceFeedActive = true;
@@ -91,12 +91,11 @@ public class Manual extends Command {
                 : ShotReadiness.REASON_DRUM_NOT_AT_SPEED);
         return;
       }
-    } else {
-      // Feeding pauses the accumulated wait WITHOUT clearing it (2026-10-27 acceptance fix):
-      // the timeout accumulates across the whole press; only initialize() resets it.
-      gateWaitTimer.stop();
     }
 
+    feedGateReleased = true;
+    // Feeding pauses the accumulated wait WITHOUT clearing it; only initialize() resets it.
+    gateWaitTimer.stop();
     IntakeRoller.mInstance.setVelocityRotPerSec(
         ManualConstants.IntakeRollerRotpsTunable.getAsDouble());
     Indexer.mInstance.setVelocityRotPerSec(ManualConstants.IndexerRotpsTunable.getAsDouble());

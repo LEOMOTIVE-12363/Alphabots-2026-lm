@@ -21,7 +21,7 @@ public final class ShootingConstants {
   public static final double SHOOTER_VELOCITY_TOLERANCE_ROTPS = 3.;
   public static final double HOOD_ANGLE_TOLERANCE_ROT = 0.02;
 
-  // Stable window the flywheel-speed gate requires before feeding starts or resumes.
+  // Stable window required for initial feeding and for recovery after a 0% stop or UNJAM.
   public static final double READY_DEBOUNCE_SEC = 0.15;
 
   // The force-feed timeout lives in DashboardControls ("/SmartDashboard/Force Feed Timeout (s)",

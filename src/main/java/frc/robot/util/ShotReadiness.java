@@ -7,12 +7,13 @@ import frc.robot.subsystems.Drum.Drum;
 import frc.robot.subsystems.Hood.Hood;
 
 /**
- * Shot-readiness rule with the flywheel-speed feed gate. {@code drumReady} and {@code hoodReady}
- * compare actual mechanism inputs with their targets. {@code rawReady} is the instantaneous
- * flywheel-speed gate (drum only: the hood never permits or inhibits feeding), and {@code
- * stableReady} is its 0.15 s debounced form — Shooting and Manual feed only while the shot is
- * stable-ready, so a hopper full of balls cannot be pushed against a flywheel that is still
- * spinning up. {@code hoodReady} stays a logged diagnostic.
+ * Shot-readiness rule with the flywheel-speed startup feed gate. {@code drumReady} and {@code
+ * hoodReady} compare actual mechanism inputs with their targets. {@code rawReady} is the
+ * instantaneous flywheel-speed measurement (drum only: the hood never permits or inhibits feeding),
+ * and {@code stableReady} is its 0.15 s debounced form. Shooting and Manual use stable readiness to
+ * release initial feeding and to re-gate recovery from 0% or UNJAM; after release, the values
+ * remain truthful measurements rather than a per-loop command to stop feeding. {@code hoodReady}
+ * stays a logged diagnostic.
  *
  * <p>All tolerances and timings are the existing {@link ShootingConstants} values. An instance
  * reads subsystem inputs and {@link DashboardControls} only and touches no NetworkTables entries,
@@ -68,8 +69,8 @@ public final class ShotReadiness {
   /**
    * Evaluates the gate against the given shot configuration: drum target in motor rot/s (the
    * Flywheel Speed Limit (%) is applied inside {@link Drum#isAtVelocity}), hood target in mechanism
-   * rotations. {@code rawReady}/{@code stableReady} are the feed-permission inputs; {@code
-   * hoodReady} is a diagnostic only.
+   * rotations. {@code rawReady}/{@code stableReady} feed the startup/recovery permission decision
+   * and remain measurement diagnostics after release; {@code hoodReady} is a diagnostic only.
    */
   public Evaluation update(double drumTargetRotps, double hoodTargetRot) {
     boolean flywheelZero = DashboardControls.getFlywheelScale() <= 0.0;

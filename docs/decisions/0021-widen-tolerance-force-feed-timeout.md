@@ -4,6 +4,8 @@
 - Status: Accepted
 - Amends: [0020 — Flywheel-at-speed feed gate (speed-only)](0020-flywheel-at-speed-feed-gate.md)
   (gate semantics unchanged; tolerance widened and a timeout latch added)
+- Amended by: [0024 — Startup-only feed gate](0024-startup-only-feed-gate.md)
+  (ordinary post-release sag no longer pauses or accumulates timeout waiting)
 
 ## Context
 
