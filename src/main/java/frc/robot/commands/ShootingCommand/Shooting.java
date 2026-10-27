@@ -476,7 +476,6 @@ public class Shooting extends Command {
     // Stop, not stow: no standing velocity request may remain, or re-enabling the robot would
     // spin the drum back up with nobody touching the controls.
     Drum.mInstance.stop();
-    Hood.mInstance.setPositionRot(0);
     IntakeRoller.mInstance.stop();
     IntakeDeploy.mInstance.setPositionCentimeter(IntakeDeployConstants.IntakeOutPosition);
     Indexer.mInstance.stop();
