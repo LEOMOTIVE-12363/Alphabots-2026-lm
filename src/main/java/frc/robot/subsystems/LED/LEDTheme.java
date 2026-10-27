@@ -9,51 +9,39 @@ import edu.wpi.first.wpilibj.util.Color;
  * smoothstep easing — never around the HSV wheel — so the designed hues render exactly and no
  * unintended hues appear between stops.
  *
- * <p>Since 2026-10-26 (user decision) every theme renders the SAME orange + purple fusion gradient:
- * alternating purple/orange stripes with one color change roughly every {@link #FUSION_BAND_METERS}
- * of the configured strip, so both colors appear across the whole robot at any installed length —
- * never "purple head, orange tail". (The first cut used four broad ~1.75 m bands; the operator
- * asked for ~30 cm alternation the same day.) The five entries keep their names and recommended
- * idle effects as operator-facing presets; only the colors were unified. The stop RGB values are
- * the approved design inputs; keep them verbatim.
+ * <p>The stop RGB values are the approved design inputs; keep them verbatim.
  */
 public enum LEDTheme {
-  MARIGOLD_BRIDGE("Marigold Bridge", IdleEffect.SLOW_FLOW, fusionStops()),
-  FESTIVAL_NIGHT("Festival Night", IdleEffect.BREATHE, fusionStops()),
-  PAPEL_FIESTA("Papel Fiesta", IdleEffect.CHASE, fusionStops()),
-  ALEBRIJE_GLOW("Alebrije Glow", IdleEffect.SLOW_FLOW, fusionStops()),
-  CANDLE_MEMORY("Candle Memory", IdleEffect.STATIC, fusionStops());
-
-  /**
-   * One fusion stripe length in meters (user decision 2026-10-26: "每 30 cm 就改一种颜色，大概"). The final
-   * stripe before the strip end may be shorter when the configured length is not an exact multiple.
-   */
-  private static final double FUSION_BAND_METERS = 0.3;
-
-  /**
-   * The fusion orange stop (user decision 2026-10-26: the first cut #FF7900 read "偏黄偏绿" on the real
-   * COB strip — its green weight pushes amber toward yellow-green there). Safety orange #FF6600
-   * cuts green by ~16% for a clearly orange reading; purple #7020D0 was approved as-is.
-   */
-  private static final int FUSION_PURPLE = 0x7020D0;
-
-  private static final int FUSION_ORANGE = 0xFF6600;
-
-  /**
-   * The alternating fusion stop set over the configured strip: purple at u=0, then orange and
-   * purple alternating every {@link #FUSION_BAND_METERS}, ending on purple at u=1. Stop positions
-   * derive from {@link LEDConstants#LENGTH_METERS} so a future length edit keeps the physical
-   * stripe width.
-   */
-  private static GradientStop[] fusionStops() {
-    int bands = (int) Math.ceil(LEDConstants.LENGTH_METERS / FUSION_BAND_METERS);
-    GradientStop[] stops = new GradientStop[bands + 1];
-    for (int k = 0; k <= bands; k++) {
-      double u = Math.min(k * FUSION_BAND_METERS / LEDConstants.LENGTH_METERS, 1.0);
-      stops[k] = new GradientStop(u, k % 2 == 0 ? FUSION_PURPLE : FUSION_ORANGE);
-    }
-    return stops;
-  }
+  MARIGOLD_BRIDGE(
+      "Marigold Bridge",
+      IdleEffect.SLOW_FLOW,
+      new GradientStop(0.0, 0xFF6500),
+      new GradientStop(0.62, 0xFFBC24),
+      new GradientStop(1.0, 0xFF9500)),
+  FESTIVAL_NIGHT(
+      "Festival Night",
+      IdleEffect.BREATHE,
+      new GradientStop(0.0, 0x7020D0),
+      new GradientStop(0.70, 0xFF167A),
+      new GradientStop(1.0, 0xFF7900)),
+  PAPEL_FIESTA(
+      "Papel Fiesta",
+      IdleEffect.CHASE,
+      new GradientStop(0.0, 0xFF7900),
+      new GradientStop(0.33, 0xFF167A),
+      new GradientStop(0.67, 0x00C9AD),
+      new GradientStop(1.0, 0xFFD040)),
+  ALEBRIJE_GLOW(
+      "Alebrije Glow",
+      IdleEffect.SLOW_FLOW,
+      new GradientStop(0.0, 0x5636FF),
+      new GradientStop(0.60, 0x00D6B2),
+      new GradientStop(1.0, 0xFF248C)),
+  CANDLE_MEMORY(
+      "Candle Memory",
+      IdleEffect.STATIC,
+      new GradientStop(0.0, 0xFF9500),
+      new GradientStop(1.0, 0xFFC15A));
 
   /** One gradient stop: path position u and the packed 0xRRGGBB design color. */
   private record GradientStop(double u, int rgb) {

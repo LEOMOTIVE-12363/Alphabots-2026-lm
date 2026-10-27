@@ -1,7 +1,7 @@
 # 0019 — Deeper fusion orange (#FF6600)
 
 - Date: 2026-10-26
-- Status: Accepted
+- Status: Superseded by [0026](0026-restore-distinct-led-theme-palettes.md)
 - Amends: [0018](0018-led-fusion-30cm-stripes.md)
 
 ## Context

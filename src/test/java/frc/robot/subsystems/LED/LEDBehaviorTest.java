@@ -47,7 +47,7 @@ class LEDBehaviorTest {
           IdleEffect.STATIC,
           1.0,
           false,
-          0x7020D0);
+          0xFF9500);
   private static final List<StyleCase> ANIMATED_STYLES =
       List.of(
           new StyleCase(
@@ -223,7 +223,7 @@ class LEDBehaviorTest {
     assertHasNonBlack(expectedExternal, style.name() + " external reference is entirely black");
     assertHasNonBlack(expectedOnboard, style.name() + " onboard reference is entirely black");
     if (style.expectedFirstPixel() != null) {
-      // Independent design-stop literal: every fusion theme starts at RGB 7020D0 (purple), not a
+      // Independent design-stop literal: Candle Memory starts at RGB FF9500 (amber), not a
       // render-derived expectation. This catches a test that accidentally selects the wrong theme
       // or black output.
       assertEquals(
