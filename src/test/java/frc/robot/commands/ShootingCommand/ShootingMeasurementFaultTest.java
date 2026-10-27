@@ -346,8 +346,17 @@ class ShootingMeasurementFaultTest {
     }
 
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+    for (int i = 0; i < 50; i++) {
+      injectDrumVelocity(DRUM_SAG_ROTPS);
+      step(s);
+      assertEquals(
+          0.0,
+          feederSetpoint(),
+          EPS,
+          "feeding and 0% time must not advance the timeout, early loop " + i);
+    }
     boolean forceFed = false;
-    for (int i = 0; i < 95 && !forceFed; i++) {
+    for (int i = 50; i < 95 && !forceFed; i++) {
       injectDrumVelocity(DRUM_SAG_ROTPS);
       step(s);
       forceFed = isFeeding();
@@ -432,6 +441,156 @@ class ShootingMeasurementFaultTest {
       step(s);
       assertEquals(0.0, feederSetpoint(), EPS, "0% time did not count, loop " + i);
     }
+    s.end(true);
+  }
+
+  @Test
+  void forceFeedKeepsUnjamAndZeroRecoveryFromReGating() throws Exception {
+    DashboardControlsTestUtil.set(FORCE_FEED_TIMEOUT, 0.6);
+    Shooting s = new Shooting(false);
+    s.initialize();
+    try {
+      boolean fed = false;
+      for (int i = 0; i < 45 && !fed; i++) {
+        injectDrumVelocity(DRUM_SAG_ROTPS);
+        step(s);
+        fed = isFeeding();
+      }
+      assertTrue(fed, "the drum never reaches the window, so feeding must be timeout-forced");
+
+      Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
+      boolean unjamming = false;
+      for (int i = 0; i < 30 && !unjamming; i++) {
+        Indexer.mInstance.periodic();
+        injectDrumVelocity(DRUM_SAG_ROTPS);
+        step(s);
+        unjamming = stateOf(s).equals("UNJAM");
+      }
+      assertTrue(unjamming, "force-feed must not suppress a confirmed jam");
+      assertTrue(indexerSetpoint() < -EPS, "UNJAM reverses the indexer");
+      Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(null);
+
+      boolean backOffFinished = false;
+      for (int i = 0; i < 40 && !backOffFinished; i++) {
+        injectDrumVelocity(DRUM_SAG_ROTPS);
+        step(s);
+        backOffFinished = !stateOf(s).equals("UNJAM");
+      }
+      assertTrue(backOffFinished, "the fixed UNJAM back-off completes");
+      injectDrumVelocity(DRUM_SAG_ROTPS);
+      step(s);
+      assertTrue(
+          isFeeding(),
+          "an existing force latch resumes on the first post-UNJAM loop, below speed or not");
+
+      DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
+      step(s);
+      assertEquals(0.0, feederSetpoint(), EPS, "0% still stops a force-fed volley");
+      assertEquals(0.0, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS);
+
+      DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+      injectDrumVelocity(DRUM_SAG_ROTPS);
+      step(s);
+      assertTrue(isFeeding(), "the same force latch resumes on the first positive loop after 0%");
+    } finally {
+      Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(null);
+      s.end(true);
+      DashboardControlsTestUtil.resetDefaults();
+    }
+  }
+
+  @Test
+  void forceFeedZeroRecoveryRestoresCurrentFeedImmediately() throws Exception {
+    DashboardControlsTestUtil.set(FORCE_FEED_TIMEOUT, 0.6);
+    Shooting s = new Shooting(true);
+    s.initialize();
+    try {
+      boolean fed = false;
+      for (int i = 0; i < 45 && !fed; i++) {
+        injectDrumVelocity(DRUM_SAG_ROTPS);
+        step(s);
+        fed = isCurrentFeeding();
+      }
+      assertTrue(fed, "the 50 A path must also be timeout-forced below speed");
+
+      DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
+      step(s);
+      assertNotEquals(MotorIO.ControlMode.CURRENT, Feeder.mInstance.getControlMode());
+      assertEquals(0.0, Feeder.mInstance.getCurrentSetpointAmps(), EPS);
+      assertNotEquals(MotorIO.ControlMode.CURRENT, Indexer.mInstance.getControlMode());
+      assertEquals(0.0, Indexer.mInstance.getCurrentSetpointAmps(), EPS);
+
+      DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+      injectDrumVelocity(DRUM_SAG_ROTPS);
+      step(s);
+      assertTrue(isCurrentFeeding(), "the force latch restores 50 A on the first positive loop");
+    } finally {
+      s.end(true);
+      DashboardControlsTestUtil.resetDefaults();
+    }
+  }
+
+  @Test
+  void retractKeepsFeedingThroughDrumSag() throws Exception {
+    Shooting s = new Shooting(false);
+    s.initialize();
+    assertTrue(stepUntilFeeding(s, 30), "reached SHOOT");
+    for (int i = 0; i < 30 && !stateOf(s).equals("RETRACT"); i++) {
+      step(s);
+    }
+    assertEquals("RETRACT", stateOf(s));
+    step(s);
+    double retractCm = ShootingConstants.INTAKE_RETRACT_POSITION_CM.getAsDouble();
+    assertEquals(retractCm, IntakeDeploy.mInstance.getPositionSetpointRot(), EPS);
+
+    double drumTarget = Drum.mInstance.getVelocitySetpointRotPerSec();
+    for (int i = 0; i < 5; i++) {
+      injectDrumVelocity(DRUM_SAG_ROTPS);
+      assertTrue(
+          Math.abs(Drum.mInstance.getVelocityRotPerSec() - drumTarget)
+              >= ShootingConstants.SHOOTER_VELOCITY_TOLERANCE_ROTPS,
+          "the injected RETRACT sag is outside the tolerance");
+      step(s);
+      assertTrue(isFeeding(), "RETRACT must not pause on post-release sag, loop " + i);
+      assertEquals("RETRACT", stateOf(s));
+      assertEquals(retractCm, IntakeDeploy.mInstance.getPositionSetpointRot(), EPS);
+    }
+    s.end(true);
+  }
+
+  @Test
+  void zeroPauseDuringStartupPreservesEarlierWaitButDoesNotCount() throws Exception {
+    Shooting s = new Shooting(false);
+    s.initialize();
+    for (int i = 0; i < 60; i++) {
+      injectDrumVelocity(DRUM_SAG_ROTPS);
+      step(s);
+      assertEquals(0.0, feederSetpoint(), EPS, "initial 1.2 s wait, loop " + i);
+    }
+
+    DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
+    for (int i = 0; i < 100; i++) {
+      step(s);
+      assertEquals(0.0, feederSetpoint(), EPS, "0% itself never feeds, loop " + i);
+    }
+
+    DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
+    for (int i = 0; i < 60; i++) {
+      injectDrumVelocity(DRUM_SAG_ROTPS);
+      step(s);
+      assertEquals(
+          0.0,
+          feederSetpoint(),
+          EPS,
+          "the 0% stretch must not count toward the timeout, early loop " + i);
+    }
+    boolean forceFed = false;
+    for (int i = 60; i < 130 && !forceFed; i++) {
+      injectDrumVelocity(DRUM_SAG_ROTPS);
+      step(s);
+      forceFed = isFeeding();
+    }
+    assertTrue(forceFed, "the earlier 1.2 s of positive-limit waiting is preserved");
     s.end(true);
   }
 
