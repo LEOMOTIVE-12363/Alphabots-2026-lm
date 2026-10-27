@@ -10,22 +10,14 @@ import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /**
- * The five Day of the Dead themes share one approved fusion design (user decision 2026-10-26):
- * alternating purple/orange stripes, one color change every ~30 cm of the configured strip, so both
- * colors appear across the whole robot at any installed length. Stop colors are exact RGB design
- * inputs, and the gradient between adjacent stops is a per-channel RGB smoothstep — never an HSV
- * hue-wheel interpolation, which would detour through colors that are not in the design.
+ * The five Day of the Dead themes have distinct approved palettes. Their stop colors are exact RGB
+ * design inputs, and the gradient between adjacent stops is a per-channel RGB smoothstep — never an
+ * HSV hue-wheel interpolation, which would detour through colors that are not in the design.
  */
 class LEDThemeTest {
   // Stop colors are 8-bit design values; anything within one LSB is the same color.
   private static final double CHANNEL_EPS = 1.0 / 255.0 + 1e-9;
   private static final double EPS = 1e-9;
-
-  // The unified fusion design: purple #7020D0 and orange #FF6600 alternating every 0.3 m of
-  // LEDConstants.LENGTH_METERS (the tests re-derive the stop positions independently).
-  private static final int[] PURPLE = {112, 32, 208};
-  private static final int[] ORANGE = {255, 102, 0}; // #FF6600 safety orange (deepened 2026-10-26)
-  private static final double BAND_METERS = 0.3;
 
   private static void assertStop(LEDTheme theme, double u, int r, int g, int b) {
     Color c = theme.colorAt(u);
@@ -42,28 +34,46 @@ class LEDThemeTest {
   }
 
   @Test
-  void stopsAlternateEveryBandMetersEndingOnPurple() {
-    int bands = (int) Math.ceil(LEDConstants.LENGTH_METERS / BAND_METERS);
-    for (int k = 0; k <= bands; k++) {
-      double u = Math.min(k * BAND_METERS / LEDConstants.LENGTH_METERS, 1.0);
-      int[] color = k % 2 == 0 ? PURPLE : ORANGE;
-      for (LEDTheme theme : LEDTheme.values()) {
-        assertStop(theme, u, color[0], color[1], color[2]);
-      }
-    }
-    assertEquals(1.0, Math.min(bands * BAND_METERS / LEDConstants.LENGTH_METERS, 1.0), EPS);
-    // 7.0 m / 0.3 m = 23⅓: 23 full stripes plus a short purple finish, ending on purple.
-    assertEquals(24, bands);
+  void everyStopReproducesItsExactDesignColor() {
+    assertStop(LEDTheme.MARIGOLD_BRIDGE, 0.0, 255, 101, 0);
+    assertStop(LEDTheme.MARIGOLD_BRIDGE, 0.62, 255, 188, 36);
+    assertStop(LEDTheme.MARIGOLD_BRIDGE, 1.0, 255, 149, 0);
+
+    assertStop(LEDTheme.FESTIVAL_NIGHT, 0.0, 112, 32, 208);
+    assertStop(LEDTheme.FESTIVAL_NIGHT, 0.70, 255, 22, 122);
+    assertStop(LEDTheme.FESTIVAL_NIGHT, 1.0, 255, 121, 0);
+
+    assertStop(LEDTheme.PAPEL_FIESTA, 0.0, 255, 121, 0);
+    assertStop(LEDTheme.PAPEL_FIESTA, 0.33, 255, 22, 122);
+    assertStop(LEDTheme.PAPEL_FIESTA, 0.67, 0, 201, 173);
+    assertStop(LEDTheme.PAPEL_FIESTA, 1.0, 255, 208, 64);
+
+    assertStop(LEDTheme.ALEBRIJE_GLOW, 0.0, 86, 54, 255);
+    assertStop(LEDTheme.ALEBRIJE_GLOW, 0.60, 0, 214, 178);
+    assertStop(LEDTheme.ALEBRIJE_GLOW, 1.0, 255, 36, 140);
+
+    assertStop(LEDTheme.CANDLE_MEMORY, 0.0, 255, 149, 0);
+    assertStop(LEDTheme.CANDLE_MEMORY, 1.0, 255, 193, 90);
   }
 
   @Test
-  void everyThemeRendersTheIdenticalFusionGradient() {
-    // The five entries are color-identical presets (names + recommended effects differ only).
-    for (double u = 0.0; u <= 1.0; u += 0.01) {
-      Color reference = LEDTheme.MARIGOLD_BRIDGE.colorAt(u);
-      for (LEDTheme theme : LEDTheme.values()) {
-        assertColorEquals(reference, theme.colorAt(u), EPS, theme + " at u=" + u);
+  void themesHaveDistinctColorPalettes() {
+    Set<String> palettes = new HashSet<>();
+    for (LEDTheme theme : LEDTheme.values()) {
+      StringBuilder palette = new StringBuilder();
+      for (double u : new double[] {0.0, 0.33, 0.60, 0.67, 1.0}) {
+        Color c = theme.colorAt(u);
+        palette
+            .append(Math.round(c.red * 255))
+            .append(',')
+            .append(Math.round(c.green * 255))
+            .append(',')
+            .append(Math.round(c.blue * 255))
+            .append(';');
       }
+      assertTrue(
+          palettes.add(palette.toString()),
+          theme + " duplicates another theme palette: " + palette);
     }
   }
 
@@ -77,36 +87,29 @@ class LEDThemeTest {
 
   @Test
   void segmentMidpointIsAPerChannelRgbSmoothstep() {
-    // The first stripe runs u in [0, 0.3/LENGTH] from #7020D0 to #FF6600. At the stripe midpoint
+    // Festival Night's first segment runs u in [0, 0.70] from #7020D0 to #FF167A. At the midpoint
     // smoothstep(0.5) = 0.5, so every channel is the plain average of the two stop channels.
-    double midU = (BAND_METERS / 2.0) / LEDConstants.LENGTH_METERS;
-    Color mid = LEDTheme.FESTIVAL_NIGHT.colorAt(midU);
+    Color mid = LEDTheme.FESTIVAL_NIGHT.colorAt(0.35);
     assertEquals((112.0 + 255.0) / 2.0 / 255.0, mid.red, CHANNEL_EPS, "midpoint red");
-    assertEquals((32.0 + 102.0) / 2.0 / 255.0, mid.green, CHANNEL_EPS, "midpoint green");
-    assertEquals((208.0 + 0.0) / 2.0 / 255.0, mid.blue, CHANNEL_EPS, "midpoint blue");
+    assertEquals((32.0 + 22.0) / 2.0 / 255.0, mid.green, CHANNEL_EPS, "midpoint green");
+    assertEquals((208.0 + 122.0) / 2.0 / 255.0, mid.blue, CHANNEL_EPS, "midpoint blue");
   }
 
   @Test
-  void gradientStaysWithinTheTwoDesignColorsChannelEnvelope() {
-    // Never the HSV hue wheel: per-channel RGB interpolation keeps every channel inside the
-    // [min(purple, orange), max(purple, orange)] envelope of the two design colors, and each
-    // channel is monotonic within every stripe (it only turns around exactly at the stops).
-    for (int i = 0; i <= 100; i++) {
+  void gradientNeverTakesTheHueWheelDetour() {
+    // #7020D0 (purple) to #FF167A (pink): one way around the HSV wheel passes through blue, cyan,
+    // and green, where the red channel falls to ~0. Per-channel RGB interpolation keeps red
+    // climbing monotonically between the two stop channels instead.
+    double prevRed = -1.0;
+    for (int i = 0; i <= 70; i++) {
       double u = i * 0.01;
-      Color c = LEDTheme.FESTIVAL_NIGHT.colorAt(u);
-      String where = "at u=" + u;
-      assertTrue(c.red >= 112.0 / 255.0 - CHANNEL_EPS, "red below envelope " + where);
-      assertTrue(c.red <= 255.0 / 255.0 + CHANNEL_EPS, "red above envelope " + where);
-      assertTrue(c.green >= 32.0 / 255.0 - CHANNEL_EPS, "green below envelope " + where);
-      assertTrue(c.green <= 102.0 / 255.0 + CHANNEL_EPS, "green above envelope " + where);
-      assertTrue(c.blue >= 0.0 - CHANNEL_EPS, "blue below envelope " + where);
-      assertTrue(c.blue <= 208.0 / 255.0 + CHANNEL_EPS, "blue above envelope " + where);
+      double red = LEDTheme.FESTIVAL_NIGHT.colorAt(u).red;
+      assertTrue(red >= 112.0 / 255.0 - CHANNEL_EPS, "red fell below the start stop at u=" + u);
+      assertTrue(red >= prevRed - EPS, "red must climb monotonically, dipped at u=" + u);
+      prevRed = red;
     }
-    // Halfway through the first stripe the color is a genuine RGB blend, not a hue-wheel detour
-    // (which would drop red toward 0 while heading around through blue/cyan/green).
-    Color halfBand =
-        LEDTheme.FESTIVAL_NIGHT.colorAt((BAND_METERS / 2.0) / LEDConstants.LENGTH_METERS);
-    assertTrue(halfBand.red > 0.6, "mid-stripe red collapsed toward a wheel detour");
+    // Late in the segment the color is essentially the pink stop, not a hue-wheel halfway color.
+    assertTrue(LEDTheme.FESTIVAL_NIGHT.colorAt(0.63).red > 0.9);
   }
 
   @Test

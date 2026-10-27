@@ -1,7 +1,7 @@
 # 0018 — Fusion stripes every ~30 cm
 
 - Date: 2026-10-26
-- Status: Accepted
+- Status: Superseded by [0026](0026-restore-distinct-led-theme-palettes.md)
 - Amends: [0017](0017-led-orange-purple-fusion-restore-menu.md)
 
 ## Context

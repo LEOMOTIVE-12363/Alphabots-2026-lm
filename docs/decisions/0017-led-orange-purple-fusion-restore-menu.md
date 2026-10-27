@@ -1,7 +1,7 @@
 # 0017 — Orange+purple fusion gradient on all themes; menu fully restored; 7 m strip
 
 - Date: 2026-10-26
-- Status: Accepted
+- Status: Partially superseded by [0026](0026-restore-distinct-led-theme-palettes.md) (unified palettes only; menu restoration and 7 m length retained)
 - Supersedes: [0014](0014-slim-led-menu-three-themes.md)
 
 ## Context
