@@ -128,4 +128,38 @@ class DashboardControlsPersistenceTest {
     // Unchanged string updates are free (no pending write churn).
     DashboardControls.persistStringIfChanged("/LED Pattern", "Chase");
   }
+
+  @Test
+  void forceFeedTimeoutRoundTripsAndSanitizes() throws Exception {
+    Path file = tempDir.resolve("settings.txt");
+
+    // "Elastic edit" to 4.5 s, persisted, power-cycled, restored — the restored value is what
+    // the shooting commands must actually use (2026-10-27 acceptance gap).
+    DashboardSettingsFile store = new DashboardSettingsFile(file);
+    DashboardControls.setSettingsFileForTest(store);
+    DashboardControlsTestUtil.setFullKey(DashboardControls.FORCE_FEED_TIMEOUT_KEY, 4.5);
+    DashboardControls.persistIfChanged();
+    store.saveNow();
+
+    DashboardControls.setSettingsFileForTest(new DashboardSettingsFile(file));
+    DashboardControls.applySavedSettings();
+    DashboardControlsTestUtil.refresh();
+    assertEquals(4.5, DashboardControls.getForceFeedTimeoutSec(), EPS);
+
+    // A saved out-of-range value is clamped into the sane window; a NaN edit reads as the
+    // default. Neither can break the feed logic (0 s would force-feed instantly).
+    Files.writeString(file, DashboardControls.FORCE_FEED_TIMEOUT_KEY + "=99.0\n");
+    DashboardControls.setSettingsFileForTest(new DashboardSettingsFile(file));
+    DashboardControls.applySavedSettings();
+    DashboardControlsTestUtil.refresh();
+    assertEquals(10.0, DashboardControls.getForceFeedTimeoutSec(), EPS, "clamped to the max");
+
+    DashboardControlsTestUtil.setFullKey(DashboardControls.FORCE_FEED_TIMEOUT_KEY, Double.NaN);
+    DashboardControlsTestUtil.refresh();
+    assertEquals(
+        DashboardControls.DEFAULT_FORCE_FEED_TIMEOUT_SEC,
+        DashboardControls.getForceFeedTimeoutSec(),
+        EPS,
+        "NaN edit reads as the default, not a broken timeout");
+  }
 }

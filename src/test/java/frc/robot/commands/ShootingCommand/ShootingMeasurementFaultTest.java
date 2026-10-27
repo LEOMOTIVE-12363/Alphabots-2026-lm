@@ -1,6 +1,7 @@
 package frc.robot.commands.ShootingCommand;
 
 import static frc.robot.util.DashboardControlsTestUtil.FLYWHEEL;
+import static frc.robot.util.DashboardControlsTestUtil.FORCE_FEED_TIMEOUT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -345,16 +346,73 @@ class ShootingMeasurementFaultTest {
   }
 
   @Test
-  void forceFeedTimeoutReleasesAPermanentlyBelowSpeedDrum() throws Exception {
-    // The field failure: the drum can never enter the tolerance (pure-P loop standing error), so
-    // the gate would hold forever. After 3 s of accumulated waiting the volley must force-feed.
+  void accumulatedWaitSurvivesBriefFeedingRecovery() throws Exception {
+    // ADR 0021: the force-feed timeout ACCUMULATES across the whole press. A brief return to
+    // speed that feeds for ~0.4 s must not reset the wait — otherwise stuttering speed keeps
+    // postponing the fallback forever (the 2026-10-27 acceptance reproduction).
     Shooting s = new Shooting(false);
     s.initialize();
     assertTrue(stepUntilFeeding(s, 30), "reached SHOOT");
 
-    // Sustained below-speed measurement at 100%: the gate pauses and the wait accumulates
-    // (~150 loops of 0.02 s); one extra loop margin on both sides of the boundary.
-    for (int i = 0; i < 156; i++) {
+    // Segment 1: below speed for 1.8 s — held, wait accumulates to 1.8 s.
+    for (int i = 0; i < 90; i++) {
+      injectDrumVelocity(DRUM_SAG_ROTPS);
+      step(s);
+      assertEquals(0.0, feederSetpoint(), EPS, "segment 1 held, loop " + i);
+    }
+
+    // Brief recovery: remove the injection, the gate re-opens and feeds ~0.4 s.
+    assertTrue(stepUntilFeeding(s, 15), "brief recovery feeds");
+    for (int i = 0; i < 20; i++) {
+      step(s);
+      assertTrue(isFeeding(), "still feeding during the brief recovery, loop " + i);
+    }
+
+    // Segment 2: below speed again for 1.8 s. Accumulated wait is now 3.6 s > 3 s, so the volley
+    // must force-feed during this segment rather than holding for another full timeout.
+    boolean forceFed = false;
+    for (int i = 0; i < 95 && !forceFed; i++) {
+      injectDrumVelocity(DRUM_SAG_ROTPS);
+      step(s);
+      forceFed = isFeeding();
+    }
+    assertTrue(forceFed, "accumulated 1.8 + 1.8 s of waiting must trigger force-feed");
+    s.end(true);
+  }
+
+  @Test
+  void forceFeedTimeoutActuallyUsesTheDashboardValue() throws Exception {
+    // The commands must read the Elastic-persisted timeout, not a compile-time constant: with
+    // the entry at 0.6 s the same below-speed hold force-feeds after ~30 loops, far short of
+    // the 3 s default (2026-10-27 acceptance gap: "not just a number in a file").
+    DashboardControlsTestUtil.set(FORCE_FEED_TIMEOUT, 0.6);
+    try {
+      Shooting s = new Shooting(false);
+      s.initialize();
+      for (int i = 0; i < 45; i++) {
+        injectDrumVelocity(DRUM_SAG_ROTPS);
+        step(s);
+        if (i < 30) {
+          assertEquals(
+              0.0, feederSetpoint(), EPS, "gate holds before the 0.6 s timeout, loop " + i);
+        }
+      }
+      assertTrue(
+          isFeeding(), "force-feed after the dashboard-configured 0.6 s, not the 3 s default");
+      s.end(true);
+    } finally {
+      DashboardControlsTestUtil.resetDefaults();
+    }
+  }
+
+  @Test
+  void forceFeedTimeoutReleasesAPermanentlyBelowSpeedDrum() throws Exception {
+    // The field failure: the drum can never enter the tolerance (pure-P loop standing error), so
+    // the gate would hold forever. Inject the below-speed measurement from the first execute so
+    // the wait accumulates from SPIN_UP onward; after 3 s (150 loops of 0.02 s) it must feed.
+    Shooting s = new Shooting(false);
+    s.initialize();
+    for (int i = 0; i < 160; i++) {
       injectDrumVelocity(DRUM_SAG_ROTPS);
       step(s);
       if (i < 150) {

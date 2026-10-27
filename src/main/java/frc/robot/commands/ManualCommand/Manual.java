@@ -2,7 +2,6 @@ package frc.robot.commands.ManualCommand;
 
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj2.command.Command;
-import frc.robot.commands.ShootingCommand.ShootingConstants;
 import frc.robot.subsystems.Drum.Drum;
 import frc.robot.subsystems.Feeder.Feeder;
 import frc.robot.subsystems.Hood.Hood;
@@ -10,6 +9,7 @@ import frc.robot.subsystems.Indexer.Indexer;
 import frc.robot.subsystems.IntakeDeploy.IntakeDeploy;
 import frc.robot.subsystems.IntakeRoller.IntakeRoller;
 import frc.robot.util.BallFlowTracker;
+import frc.robot.util.DashboardControls;
 import frc.robot.util.OperatorStatus;
 import frc.robot.util.ShotReadiness;
 import org.littletonrobotics.junction.Logger;
@@ -20,8 +20,9 @@ import org.littletonrobotics.junction.Logger;
  * after the 0.15 s window) and the flywheel limit is positive. The hood never gates feeding. A zero
  * flywheel limit or a below-speed measurement stops only the feed path for that loop, and feeding
  * resumes by itself once the shot is stable-ready again. The same force-feed timeout as Shooting
- * applies: waiting at a positive limit for {@link ShootingConstants#FEED_FORCE_TIMEOUT_SEC} latches
- * the speed gate off for the rest of the press, so balls always come out.
+ * applies: waiting at a positive limit for the configured timeout (default 3 s, Elastic-persisted
+ * via DashboardControls) latches the speed gate off for the rest of the press, so balls always come
+ * out.
  */
 public class Manual extends Command {
   // Shared readiness rule with this command's own debounce, so a fresh press re-earns the full
@@ -75,7 +76,7 @@ public class Manual extends Command {
     }
     if (!lastEvaluation.stableReady()) {
       gateWaitTimer.start();
-      if (gateWaitTimer.hasElapsed(ShootingConstants.FEED_FORCE_TIMEOUT_SEC.getAsDouble())) {
+      if (gateWaitTimer.hasElapsed(DashboardControls.getForceFeedTimeoutSec())) {
         forceFeedActive = true;
       }
       if (!forceFeedActive) {
@@ -91,8 +92,9 @@ public class Manual extends Command {
         return;
       }
     } else {
+      // Feeding pauses the accumulated wait WITHOUT clearing it (2026-10-27 acceptance fix):
+      // the timeout accumulates across the whole press; only initialize() resets it.
       gateWaitTimer.stop();
-      gateWaitTimer.reset();
     }
 
     IntakeRoller.mInstance.setVelocityRotPerSec(

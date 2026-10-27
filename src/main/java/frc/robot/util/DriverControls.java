@@ -65,6 +65,19 @@ public final class DriverControls {
     return action.pressed.test(controllers[port]);
   }
 
+  /**
+   * Raw hold state of one specific port, ignoring control priority — the physical button edge
+   * source for bindings (like the latched intake) that must distinguish "the operator pressed" from
+   * "control priority changed while held". Reads the hardware state of that pad only; a
+   * disconnected pad's reads are garbage, so callers must gate on connection themselves.
+   */
+  public boolean isHeldByPort(int port, Action action) {
+    if (action.fullOnly && port == DEMO_PORT) {
+      return false;
+    }
+    return action.pressed.test(controllers[port]);
+  }
+
   public double leftX() {
     return axis(XboxController::getLeftX);
   }

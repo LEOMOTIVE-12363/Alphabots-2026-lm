@@ -12,6 +12,7 @@ public final class DashboardControlsTestUtil {
   public static final String TURN = "Turn Speed Limit (%)";
   public static final String FLYWHEEL = "Flywheel Speed Limit (%)";
   public static final String HOOD = "Hood Angle (%)";
+  public static final String FORCE_FEED_TIMEOUT = "Force Feed Timeout (s)";
 
   /** Writes a value as Elastic would and makes it visible to the robot code. */
   public static void set(String label, double value) {
@@ -31,6 +32,8 @@ public final class DashboardControlsTestUtil {
     set(FLYWHEEL, DashboardControls.DEFAULT_SPEED_PERCENT);
     set(HOOD, DashboardControls.DEFAULT_HOOD_PERCENT);
     setFullKey(DashboardControls.LED_BRIGHTNESS_KEY, DashboardControls.DEFAULT_BRIGHTNESS_PERCENT);
+    setFullKey(
+        DashboardControls.FORCE_FEED_TIMEOUT_KEY, DashboardControls.DEFAULT_FORCE_FEED_TIMEOUT_SEC);
   }
 
   /**
@@ -41,7 +44,12 @@ public final class DashboardControlsTestUtil {
     try {
       for (String name :
           new String[] {
-            "drivePercent", "turnPercent", "flywheelPercent", "hoodPercent", "ledBrightnessPercent"
+            "drivePercent",
+            "turnPercent",
+            "flywheelPercent",
+            "hoodPercent",
+            "ledBrightnessPercent",
+            "forceFeedTimeoutSec"
           }) {
         Field field = DashboardControls.class.getDeclaredField(name);
         field.setAccessible(true);

@@ -148,6 +148,7 @@ class TeleopIntegrationTest {
   private static void stepRobot() {
     DriverStationSim.notifyNewData();
     CommandScheduler.getInstance().run(); // buttons + subsystem periodics + commands
+    container.pollIntakeLatch(); // mirrors Robot.robotPeriodic's post-scheduler edge poll
     OperatorStatus.update();
     if (++dashboardCounter >= 5) {
       dashboardCounter = 0;
@@ -1921,6 +1922,77 @@ class TeleopIntegrationTest {
   }
 
   @Test
+  void intakeLatchDoesNotRestartWhenControlReturnsWhileHeld() {
+    // ADR 0016: control returning to a pad that still holds LT is NOT a new press — the latch
+    // must stay down until the operator releases and presses LT again (2026-10-27 acceptance
+    // reproduction: the old edge binding restarted intake and a later release could not stop it).
+    connect(0);
+    setTrigger(0, 0.9);
+    boolean running = false;
+    for (int i = 0; i < 10 && !running; i++) {
+      stepRobot();
+      running = intakeRollerRunning();
+    }
+    assertTrue(running, "port 0 intake latched on with LT held");
+
+    connect(1); // takeover tears the latch down; port 0's LT stays held
+    settle();
+    assertFalse(intakeRollerRunning(), "takeover stopped the intake");
+
+    disconnect(1); // control returns to port 0 while its LT is still held
+    for (int i = 0; i < 15; i++) {
+      stepRobot();
+      assertFalse(intakeRollerRunning(), "returning control must not re-latch intake, loop " + i);
+    }
+
+    // Release and press LT again — that IS a new press and must start the intake.
+    setTrigger(0, 0.0);
+    setTrigger(0, 0.9);
+    setTrigger(0, 0.0);
+    running = false;
+    for (int i = 0; i < 10 && !running; i++) {
+      stepRobot();
+      running = intakeRollerRunning();
+    }
+    assertTrue(running, "release + fresh press starts the intake");
+  }
+
+  @Test
+  void intakeLatchDoesNotRestartOnReconnectWhileHeld() {
+    // The disconnect flavor: the pad is unplugged with LT held and plugged back in — the
+    // physical hold is not a new press either, so the latch must stay down until a real
+    // release + press.
+    connect(0);
+    setTrigger(0, 0.9);
+    boolean running = false;
+    for (int i = 0; i < 10 && !running; i++) {
+      stepRobot();
+      running = intakeRollerRunning();
+    }
+    assertTrue(running, "port 0 intake latched on with LT held");
+
+    disconnect(0); // unplugged: the latch tears down; simulate the finger staying on LT
+    settle();
+    assertFalse(intakeRollerRunning(), "disconnect stopped the intake");
+    DriverStationSim.setJoystickAxis(0, AXIS_LEFT_TRIGGER, 0.9);
+
+    connect(0); // replugged with LT still held — must NOT restart
+    for (int i = 0; i < 15; i++) {
+      stepRobot();
+      assertFalse(intakeRollerRunning(), "reconnect with LT held must not re-latch, loop " + i);
+    }
+
+    setTrigger(0, 0.0);
+    pressIntakeToggle(0);
+    running = false;
+    for (int i = 0; i < 10 && !running; i++) {
+      stepRobot();
+      running = intakeRollerRunning();
+    }
+    assertTrue(running, "release + fresh press starts the intake after the reconnect");
+  }
+
+  @Test
   void layoutPercentageControlsAreEditableNumericInputs() throws Exception {
     JsonNode root = new ObjectMapper().readTree(Files.readString(latestLayout()));
     List<String> expectedInputs =
@@ -1933,7 +2005,8 @@ class TeleopIntegrationTest {
             "demo|Turn Speed Limit (%)|/SmartDashboard/Turn Speed Limit (%)",
             "demo|Flywheel Speed Limit (%)|/SmartDashboard/Flywheel Speed Limit (%)",
             "demo|Hood Angle (%)|/SmartDashboard/Hood Angle (%)",
-            "demo|LED Brightness (%)|/Tuning/LED Brightness (%)");
+            "demo|LED Brightness (%)|/Tuning/LED Brightness (%)",
+            "demo|Force Feed Timeout (s)|/SmartDashboard/Force Feed Timeout (s)");
     List<String> foundInputs = new ArrayList<>();
     List<String> invalidInputs = new ArrayList<>();
     List<String> percentageSliders = new ArrayList<>();
@@ -2038,11 +2111,12 @@ class TeleopIntegrationTest {
             "Feed Allowed",
             "Feed Blocked Reason",
             "Drum Target (rot/s)",
-            "Drum Actual (rot/s)");
+            "Drum Actual (rot/s)",
+            "Force Feed Timeout (s)");
     assertEquals(
         expectedTitles,
         actualTitles,
-        "demo must contain exactly the 21 selected-style and diagnostic widgets");
+        "demo must contain exactly the 22 selected-style and diagnostic widgets");
   }
 
   @Test

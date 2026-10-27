@@ -34,12 +34,16 @@ public final class DashboardControls {
   public static final double DEFAULT_SPEED_PERCENT = 100.0;
   public static final double DEFAULT_HOOD_PERCENT = 0.0;
   public static final double DEFAULT_BRIGHTNESS_PERCENT = 100.0;
+  public static final double DEFAULT_FORCE_FEED_TIMEOUT_SEC = 3.0;
+  static final double MIN_FORCE_FEED_TIMEOUT_SEC = 0.5;
+  static final double MAX_FORCE_FEED_TIMEOUT_SEC = 10.0;
 
   static final String DRIVE_KEY = "/SmartDashboard/Drive Speed Limit (%)";
   static final String TURN_KEY = "/SmartDashboard/Turn Speed Limit (%)";
   static final String FLYWHEEL_KEY = "/SmartDashboard/Flywheel Speed Limit (%)";
   static final String HOOD_KEY = "/SmartDashboard/Hood Angle (%)";
   static final String LED_BRIGHTNESS_KEY = "/Tuning/LED Brightness (%)";
+  static final String FORCE_FEED_TIMEOUT_KEY = "/SmartDashboard/Force Feed Timeout (s)";
 
   private static final LoggedNetworkNumber drivePercent =
       new LoggedNetworkNumber(DRIVE_KEY, DEFAULT_SPEED_PERCENT);
@@ -51,6 +55,8 @@ public final class DashboardControls {
       new LoggedNetworkNumber(HOOD_KEY, DEFAULT_HOOD_PERCENT);
   private static final LoggedNetworkNumber ledBrightnessPercent =
       new LoggedNetworkNumber(LED_BRIGHTNESS_KEY, DEFAULT_BRIGHTNESS_PERCENT);
+  private static final LoggedNetworkNumber forceFeedTimeoutSec =
+      new LoggedNetworkNumber(FORCE_FEED_TIMEOUT_KEY, DEFAULT_FORCE_FEED_TIMEOUT_SEC);
 
   private static DashboardSettingsFile settingsFile;
 
@@ -79,6 +85,9 @@ public final class DashboardControls {
         sanitizePercent(
             saved.getDouble(LED_BRIGHTNESS_KEY, DEFAULT_BRIGHTNESS_PERCENT),
             DEFAULT_BRIGHTNESS_PERCENT));
+    forceFeedTimeoutSec.set(
+        sanitizeForceFeedTimeoutSec(
+            saved.getDouble(FORCE_FEED_TIMEOUT_KEY, DEFAULT_FORCE_FEED_TIMEOUT_SEC)));
   }
 
   /**
@@ -97,6 +106,7 @@ public final class DashboardControls {
     file.update(
         LED_BRIGHTNESS_KEY,
         sanitizePercent(ledBrightnessPercent.get(), DEFAULT_BRIGHTNESS_PERCENT));
+    file.update(FORCE_FEED_TIMEOUT_KEY, sanitizeForceFeedTimeoutSec(forceFeedTimeoutSec.get()));
   }
 
   private static DashboardSettingsFile settingsFile() {
@@ -128,6 +138,22 @@ public final class DashboardControls {
   /** Swaps the persistence backend for tests; pass null to restore the default. */
   static void setSettingsFileForTest(DashboardSettingsFile file) {
     settingsFile = file;
+  }
+
+  /**
+   * Force-feed timeout in seconds: clamped to a sane range so a stray edit can never disable the
+   * gate's fallback (0 would force-feed instantly) nor freeze the robot out for minutes. NaN/inf
+   * fall back to the default.
+   */
+  public static double getForceFeedTimeoutSec() {
+    return sanitizeForceFeedTimeoutSec(forceFeedTimeoutSec.get());
+  }
+
+  static double sanitizeForceFeedTimeoutSec(double sec) {
+    if (!Double.isFinite(sec)) {
+      return DEFAULT_FORCE_FEED_TIMEOUT_SEC;
+    }
+    return MathUtil.clamp(sec, MIN_FORCE_FEED_TIMEOUT_SEC, MAX_FORCE_FEED_TIMEOUT_SEC);
   }
 
   /** Clamps a dashboard percentage to [0, 100]; NaN/inf fall back to defaultPercent. */

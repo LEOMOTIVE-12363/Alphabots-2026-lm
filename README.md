@@ -22,7 +22,7 @@
 - **视觉** — Limelight（MegaTag2）全局位姿估计，融入 swerve 里程计
 - **AdvantageKit 三模式** — REAL / SIM / REPLAY 共用一套代码，日志可确定性回放
 - **maple-sim 桌面仿真** — 2026 REBUILT 场地（含 HUB / Trench 碰撞体）物理仿真
-- **Elastic 自定义仪表盘** — 布局版本化于 `elastic-layout-1026.json`；配套 NetworkTables 调参脚本 `scripts/nt_tune.py`、`scripts/pid_analysis.py`
+- **Elastic 自定义仪表盘** — 布局版本化于 `elastic-layout-1027.json`；配套 NetworkTables 调参脚本 `scripts/nt_tune.py`、`scripts/pid_analysis.py`
 
 ## 分支模型
 
@@ -52,11 +52,11 @@ Driver Station 编号 **1 优先于 0**，优先级同时适用于驾驶和所�
 
 1 号 Back 按 Marigold Bridge → Festival Night → Papel Fiesta → Alebrije Glow → Candle Memory 循环五套主题，Start 按 Static → Breathe → Slow Flow → Chase → Color Step 循环五种待机动画；每次按下只前进一项。两者直接操作现有 `LED Pattern` / `LED Idle Effect` chooser，手柄或 Elastic 任一端改变后，另一端同步显示实际选择，并沿用现有断电持久化。切换主题仍自动预选推荐动画，之后可用 Start 或 Elastic 覆盖；Off 与四个独立模式下 Back 进入 Marigold Bridge，Start 不改变任何选择。0 号 Back 未绑定，0 号 Start 仍仅用于仿真场地重置。
 
-LT 为开关式（2026-10-26 起）：按一下展开 intake 并开始持续吸球，再按一下 LT 停止吸球（intake 保持展开、不自动收回）；机器人禁用或控制手柄断连/失去优先权时同样停止且不会自行恢复，需重新按 LT。按住 LB 吐球时若吸球仍在进行，会先停止吸球再开始吐球；松开 LB 后吐球停止，吸球不会自动恢复。方向键左执行向内收回及机械归零校准。LB/RT 反转为点动式：反转输出按当前控制手柄的按住状态实时重算——控制手柄按住 LB 时吸球滚轮、Indexer、Feeder 反转（RT 仅 Indexer/Feeder；RT 不打断进行中的吸球），松开、断连、失去优先权且接管手柄未按住同一键、或机器人禁用时归零；反转不占用子系统，因此与射球同时进行时反转写入会被射球循环覆盖（沿用原有行为，本轮有意未改）。
+LT 为开关式（2026-10-26 起）：按一下展开 intake 并开始持续吸球，再按一下 LT 停止吸球（intake 保持展开、不自动收回）；机器人禁用或控制手柄断连/失去优先权时同样停止且不会自行恢复；若停止时 LT 仍被按住，则必须先松开 LT 再重新按下才算一次新的按压（控制权恢复本身不算，2026-10-27 起由真实按键边沿判定，见 `docs/decisions/0022`）。按住 LB 吐球时若吸球仍在进行，会先停止吸球再开始吐球；松开 LB 后吐球停止，吸球不会自动恢复。方向键左执行向内收回及机械归零校准。LB/RT 反转为点动式：反转输出按当前控制手柄的按住状态实时重算——控制手柄按住 LB 时吸球滚轮、Indexer、Feeder 反转（RT 仅 Indexer/Feeder；RT 不打断进行中的吸球），松开、断连、失去优先权且接管手柄未按住同一键、或机器人禁用时归零；反转不占用子系统，因此与射球同时进行时反转写入会被射球循环覆盖（沿用原有行为，本轮有意未改）。
 
 ## 演示面板与到速送料门控
 
-在机器人已使能且按键来源手柄拥有控制权时，按住既有射球键会先把飞轮（Drum）与 Hood 驱动到 Elastic 目标，**等飞轮实测转速到达限幅后目标 ±3.0 rot/s 并稳定 0.15 秒后才开始送料**（2026-10-26 晚起容差由 ±1.0 放宽：实车纯 P 速度环带载存在稳态误差，±1.0 的窄窗在任何百分比下都进不去，见 `docs/decisions/0021`）：1 号/0 号 RB 的 `Shooting(false)`（普通速度模式）、0 号 A 的 `Shooting(true)`（Indexer 与 Feeder 保持 50 A 电流模式）以及 0 号 X 的 Manual 使用同一门控（Manual 按其自身 50 rot/s 目标判速）。这样满筐球不会被推到还在加速的飞轮上卡住。**3 秒超时强制射**：正值百分比下累计等待（spin-up 与中途掉速暂停均计入；0% 不计时）满 3 秒仍未放行时，本次按压内强制送料，转速门控锁存关闭直到松键重按——即使飞轮始终到不了目标，球也一定能出来（超时可经 `/Tuning/Shooting/ForceFeedTimeoutSec` 实车调整）。门控在整轮射球中持续生效：射球中实测掉速当拍即停送料（Drum/Hood 继续驱动），恢复到速并重新稳定后自动续打，无需松键重按；`Flywheel Speed Limit (%)` 调到 0% 同样当拍停料（超时锁存也不越过 0%——0% 是操作员明确停转飞轮），调回正值后等飞轮重新到速、过稳定窗即自动恢复。Hood 位置**不参与**送料许可（只作日志诊断），因此 Hood 目标够不着不会把球憋在送料路里；目标中途改变会带来短暂停顿（旧测量对新目标判为未到速），到速后自动续打。这些射球路径不读取视觉、AprilTag、位姿或瞄准数据。松键、手柄断连、失去控制权、命令打断或机器人禁用仍会停止对应命令并停料。松键或禁用后，Drum 不再保持驻停转速，而是断电随惯性滑行停转（2026-10-26 起，见 `docs/decisions/0015`）；重新使能不会让 Drum 自行转起，只有重新按住射球键才会再次驱动它，代价是每次新一轮射球都要从静止重新加速。
+在机器人已使能且按键来源手柄拥有控制权时，按住既有射球键会先把飞轮（Drum）与 Hood 驱动到 Elastic 目标，**等飞轮实测转速到达限幅后目标 ±3.0 rot/s 并稳定 0.15 秒后才开始送料**（2026-10-26 晚起容差由 ±1.0 放宽：实车纯 P 速度环带载存在稳态误差，±1.0 的窄窗在任何百分比下都进不去，见 `docs/decisions/0021`）：1 号/0 号 RB 的 `Shooting(false)`（普通速度模式）、0 号 A 的 `Shooting(true)`（Indexer 与 Feeder 保持 50 A 电流模式）以及 0 号 X 的 Manual 使用同一门控（Manual 按其自身 50 rot/s 目标判速）。这样满筐球不会被推到还在加速的飞轮上卡住。**3 秒超时强制射**：正值百分比下累计等待（spin-up 与中途掉速暂停均计入；0% 不计时）满 3 秒仍未放行时，本次按压内强制送料，转速门控锁存关闭直到松键重按——即使飞轮始终到不了目标，球也一定能出来（超时阈值可在 Elastic 演示页的 `Force Feed Timeout (s)` 输入框调整，默认 3 秒、断电持久化、有效范围 0.5–10 秒，见 `docs/decisions/0022`；累计等待按同一次按压计——短暂恢复送料不清零，送球/0%/清堵期间暂停累计）。门控在整轮射球中持续生效：射球中实测掉速当拍即停送料（Drum/Hood 继续驱动），恢复到速并重新稳定后自动续打，无需松键重按；`Flywheel Speed Limit (%)` 调到 0% 同样当拍停料（超时锁存也不越过 0%——0% 是操作员明确停转飞轮），调回正值后等飞轮重新到速、过稳定窗即自动恢复。Hood 位置**不参与**送料许可（只作日志诊断），因此 Hood 目标够不着不会把球憋在送料路里；目标中途改变会带来短暂停顿（旧测量对新目标判为未到速），到速后自动续打。这些射球路径不读取视觉、AprilTag、位姿或瞄准数据。松键、手柄断连、失去控制权、命令打断或机器人禁用仍会停止对应命令并停料。松键或禁用后，Drum 不再保持驻停转速，而是断电随惯性滑行停转（2026-10-26 起，见 `docs/decisions/0015`）；重新使能不会让 Drum 自行转起，只有重新按住射球键才会再次驱动它，代价是每次新一轮射球都要从静止重新加速。
 
 自动清堵的阈值、确认、反向输出与时长保持不变；0% 暂停和 UNJAM 期间 retract 计时仍冻结。清堵完成后命令经由同一转速门控恢复送料：飞轮若在堵转期间掉速，会先重新到速、过稳定窗再续打，不会把球立即推回可能已掉速的飞轮（若超时锁存已激活，则清堵后直接继续强制送料）。
 
@@ -69,7 +69,7 @@ LT 为开关式（2026-10-26 起）：按一下展开 intake 并开始持续吸�
 
 ## Elastic LED 预览
 
-`elastic-layout-1026.json` 的 `LED Preview` 页提供独立于实灯输出的配色与动画预览。使用时必须正在运行机器人代码或桌面仿真，并将 Elastic 连接到该进程的 NetworkTables；仅打开布局不会产生预览数据。
+`elastic-layout-1027.json` 的 `LED Preview` 页提供独立于实灯输出的配色与动画预览。使用时必须正在运行机器人代码或桌面仿真，并将 Elastic 连接到该进程的 NetworkTables；仅打开布局不会产生预览数据。
 
 - 顶部 `LED Pattern` 与 `LED Idle Effect` 沿用现有设置键。大的 `Current Selection` 卡片预览当前 Pattern（主题 Pattern 使用当前 Idle Effect）；下方五张固定卡片分别展示 Marigold Bridge / Slow Flow、Festival Night / Breathe、Papel Fiesta / Chase、Alebrije Glow / Slow Flow、Candle Memory / Static 的主题与推荐效果（五套主题现为同一套橙紫融合配色，卡片以推荐动画区分）。
 - 所有卡片按固定参考亮度生成，不读取或显示实灯状态或实际亮度；`LED Brightness (%)` 不缩放预览，吸球、射球、吐球等机制动作也不会打断或替换预览。
@@ -93,7 +93,7 @@ LT 为开关式（2026-10-26 起）：按一下展开 intake 并开始持续吸�
 - `frc.robot.subsystems` — 单例模式（每个子系统 `public static final mInstance`），`X.java` + `XConstants.java` 成对（CAN ID、增益、仿真配置）。
 - `frc.robot.commands` — 每个命令独立目录，各带 `*Constants.java`。
 - 三种运行模式由 `Constants.currentMode`（REAL / SIM / REPLAY）切换，各子系统按模式选择 IO 实现。
-- `elastic-layout-1026.json` — Elastic 仪表盘布局，与代码内 NetworkTables 接口同步维护。
+- `elastic-layout-1027.json` — Elastic 仪表盘布局，与代码内 NetworkTables 接口同步维护。
 
 ## 开发流程与决策记录
 
