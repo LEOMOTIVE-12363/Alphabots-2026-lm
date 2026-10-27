@@ -6,7 +6,8 @@
   (the drum half of the release/disable teardown; unchanged here),
   [0021](0021-widen-tolerance-force-feed-timeout.md) /
   [0022](0022-acceptance-fixes-accumulation-persistence-lt-edges.md) (the feed gate itself is
-  untouched by this record)
+  untouched by this record), [0024](0024-startup-only-feed-gate.md) (this branch was rebased
+  on top of 0024's gate restructure, which does not touch `end()`)
 
 ## Context
 
@@ -49,9 +50,28 @@ persistence changes. No gain, limit, or percent→angle mapping changes.
   reads, not follower-restored values. GREEN after the one-line deletion.
 - Full `./gradlew build --offline --rerun-tasks`: BUILD SUCCESSFUL, 32 suites /
   **336 tests / 0 failures / 0 errors / 0 skipped** (334 baseline + 2 new), spotless green.
+  (Captured on the pre-rebase base `dae52ef`.)
 - ~60 s `simulateJava --offline` smoke from this worktree: startup complete, no Exception /
   "Error at" / ERROR lines; the only warnings were the pre-existing maple-sim 20 ms loop
-  overruns (see the task evidence log).
+  overruns (see the task evidence log). (Also captured on the pre-rebase base.)
+
+**Rebase onto 0024 (`origin/demo` `0a8d92e`) and re-verification on the combined tree.**
+PR #74 restructured the same `Shooting`/`Manual` gate code and both READMEs' shooting
+paragraphs, but left `end()` untouched, so the one-line deletion and both regressions
+reapplied cleanly; the README sentence was re-appended to the **new** upstream paragraph text
+in both languages (the old gating paragraph was not resurrected). Re-verified:
+
+- The two named regressions PASS (`./gradlew test --offline --tests …
+  TeleopIntegrationTest.shootingReleaseKeepsDashboardHoodTargetWithoutAutoZero --tests …
+  TeleopIntegrationTest.disableDuringShootingKeepsDashboardHoodTargetWithoutAutoZero`).
+- `./gradlew spotlessApply --offline` (no changes) and full `./gradlew build --offline
+  --rerun-tasks`: BUILD SUCCESSFUL, 32 suites / **336 tests / 0 failures / 0 errors /
+  0 skipped**.
+- ~60 s `simulateJava --offline` on the combined tree: startup complete, no Exception /
+  "Error at" / ERROR lines; two 20 ms loop-overrun warnings — one alongside Phoenix library
+  initialization, one with a tracer of `robotPeriodic(): 0.043 s` (while
+  `simulationPeriodic(): 0.0013 s`) — startup transients, not attributed to this change
+  (full log in the task evidence).
 
 ## Consequences
 
