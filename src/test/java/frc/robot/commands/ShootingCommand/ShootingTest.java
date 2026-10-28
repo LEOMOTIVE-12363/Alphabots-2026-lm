@@ -15,6 +15,7 @@ import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.simulation.DriverStationSim;
 import edu.wpi.first.wpilibj.simulation.SimHooks;
+import frc.lib.bases.MotorSubsystem;
 import frc.lib.io.MotorIO;
 import frc.robot.subsystems.Drum.Drum;
 import frc.robot.subsystems.Drum.DrumConstants;
@@ -321,6 +322,8 @@ class ShootingTest {
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
     boolean unjamming = false;
     for (int i = 0; i < 20 && !unjamming; i++) {
+      // True-stall evidence: the sim indexer otherwise tracks its healthy feed setpoint.
+      injectIndexerVelocity(STALLED_INDEXER_ROTPS);
       step(shooting);
       unjamming = indexerSetpoint() < -EPS;
     }
@@ -367,6 +370,8 @@ class ShootingTest {
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
     boolean unjamming = false;
     for (int i = 0; i < 20 && !unjamming; i++) {
+      // True-stall evidence: the sim indexer otherwise tracks its healthy feed setpoint.
+      injectIndexerVelocity(STALLED_INDEXER_ROTPS);
       step(shooting);
       unjamming = indexerSetpoint() < -EPS;
     }
@@ -437,6 +442,40 @@ class ShootingTest {
     return f.get(s).toString();
   }
 
+  /**
+   * Overwrites one field of a subsystem's logged inputs, mirroring what a real measurement fault
+   * would look like at the only layer the control loop reads. Must run AFTER a periodic (which
+   * refreshes inputs from the IO) and BEFORE the execute() that should see the fault.
+   */
+  private static void overrideInput(MotorSubsystem subsystem, String field, double value)
+      throws Exception {
+    var inputsField = MotorSubsystem.class.getDeclaredField("inputs");
+    inputsField.setAccessible(true);
+    Object inputs = inputsField.get(subsystem);
+    for (Class<?> c = inputs.getClass(); c != null; c = c.getSuperclass()) {
+      try {
+        var f = c.getDeclaredField(field);
+        f.setAccessible(true);
+        f.setDouble(inputs, value);
+        return;
+      } catch (NoSuchFieldException e) {
+        // walk up to the declaring class
+      }
+    }
+    throw new NoSuchFieldException(field);
+  }
+
+  // Hand-derived stall evidence speeds, independent of the production threshold constant: 20
+  // rot/s is a healthy feed speed (a quarter of the 80 rot/s target, far above any near-zero
+  // bound), 0.0 is a fully stalled indexer. Re-inject before every execute — the periodic inside
+  // step() refreshes the measured velocity from the sim, which tracks its healthy feed setpoint.
+  private static final double HEALTHY_INDEXER_ROTPS = 20.0;
+  private static final double STALLED_INDEXER_ROTPS = 0.0;
+
+  private static void injectIndexerVelocity(double rotPerSec) throws Exception {
+    overrideInput(Indexer.mInstance, "velocityRadPerSec", rotPerSec * 2.0 * Math.PI);
+  }
+
   private static double retractElapsed(Shooting s) throws Exception {
     var f = Shooting.class.getDeclaredField("retractTimer");
     f.setAccessible(true);
@@ -470,7 +509,10 @@ class ShootingTest {
     s.initialize();
     assertTrue(stepUntilFeeding(s, 30));
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
-    for (int i = 0; i < 30 && !stateOf(s).equals("UNJAM"); i++) step(s);
+    for (int i = 0; i < 30 && !stateOf(s).equals("UNJAM"); i++) {
+      injectIndexerVelocity(STALLED_INDEXER_ROTPS); // true-stall evidence for the classifier
+      step(s);
+    }
     assertEquals("UNJAM", stateOf(s));
     double before = retractElapsed(s);
     for (int i = 0; i < 5; i++) step(s);
@@ -484,7 +526,10 @@ class ShootingTest {
     s.initialize();
     assertTrue(stepUntilFeeding(s, 30));
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
-    for (int i = 0; i < 30 && !stateOf(s).equals("UNJAM"); i++) step(s);
+    for (int i = 0; i < 30 && !stateOf(s).equals("UNJAM"); i++) {
+      injectIndexerVelocity(STALLED_INDEXER_ROTPS); // true-stall evidence for the classifier
+      step(s);
+    }
     assertEquals("UNJAM", stateOf(s));
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(null);
     for (int i = 0; i < 40 && stateOf(s).equals("UNJAM"); i++) step(s);
@@ -611,6 +656,7 @@ class ShootingTest {
 
       Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
       for (int i = 0; i < 30 && !stateOf(s).equals("UNJAM"); i++) {
+        injectIndexerVelocity(STALLED_INDEXER_ROTPS); // true-stall evidence for the classifier
         step(s);
       }
       assertEquals("UNJAM", stateOf(s));
@@ -722,10 +768,12 @@ class ShootingTest {
     assertTrue(sawRecoveryStabilizing, "the recovery debounce phase shows Stabilizing");
 
     // While the jam debounce runs the volley keeps feeding and the panel agrees; in UNJAM the panel
-    // shows the jam action and blocks feeding.
+    // shows the jam action and blocks feeding. The stall evidence (high current + near-zero speed)
+    // is re-injected every loop: the sim indexer otherwise tracks its healthy feed setpoint.
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
     boolean unjammed = false;
     for (int i = 0; i < 30 && !unjammed; i++) {
+      injectIndexerVelocity(STALLED_INDEXER_ROTPS);
       stepWithPanel(s);
       // The jam debounce (0.2 s) and the retract delay (0.2 s) expire on the same loop here; which
       // feeding state the jam trips from depends on a one-loop test-clock lag, so accept both.
@@ -891,9 +939,10 @@ class ShootingTest {
     // stale low current, feed a clear sample, and hide a free-running debouncer.
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
     Indexer.mInstance.periodic();
+    injectIndexerVelocity(STALLED_INDEXER_ROTPS); // a full stall sample, still just one
     step(s);
     assertNotEquals(
-        "UNJAM", stateOf(s), "a single high-current sample after a long pause must not trip UNJAM");
+        "UNJAM", stateOf(s), "a single stall sample after a long pause must not trip UNJAM");
 
     // The spike falls right back: no jam may ever be confirmed.
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(null);
@@ -922,18 +971,21 @@ class ShootingTest {
 
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
     Indexer.mInstance.periodic();
-    // The 0.2 s window is ten 0.02 s loops of sustained high current; a debouncer that free-ran
-    // through the pause would trip on the very first loop instead.
+    // The 0.2 s window is ten 0.02 s loops of sustained stall evidence (high current + near-zero
+    // speed); a debouncer that free-ran through the pause would trip on the very first loop
+    // instead.
     for (int i = 0; i < 8; i++) {
+      injectIndexerVelocity(STALLED_INDEXER_ROTPS);
       step(s);
       assertNotEquals("UNJAM", stateOf(s), "the window restarts at the resume, loop " + i);
     }
     boolean unjammed = false;
     for (int i = 0; i < 20 && !unjammed; i++) {
+      injectIndexerVelocity(STALLED_INDEXER_ROTPS);
       step(s);
       unjammed = stateOf(s).equals("UNJAM");
     }
-    assertTrue(unjammed, "sustained high current still trips UNJAM after the full window");
+    assertTrue(unjammed, "sustained stall evidence still trips UNJAM after the full window");
     s.end(true);
   }
 
@@ -945,6 +997,7 @@ class ShootingTest {
 
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
     for (int i = 0; i < 30 && !stateOf(s).equals("UNJAM"); i++) {
+      injectIndexerVelocity(STALLED_INDEXER_ROTPS); // true-stall evidence for the classifier
       step(s);
     }
     assertEquals("UNJAM", stateOf(s));
@@ -961,6 +1014,7 @@ class ShootingTest {
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
     Indexer.mInstance.periodic();
     for (int i = 0; i < 8; i++) {
+      injectIndexerVelocity(STALLED_INDEXER_ROTPS); // full stall samples, not yet 0.2 s
       step(s);
       assertNotEquals("UNJAM", stateOf(s), "post-unjam window restarts clean, loop " + i);
     }
@@ -988,8 +1042,8 @@ class ShootingTest {
 
   @Test
   void longZeroFlywheelHoldDoesNotPreFillJamWindow() throws Exception {
-    // A long 0% hold is not feeding and must not pre-fill the jam window. The first high-current
-    // sample after the positive-limit resume still needs the full 0.2 s confirmation.
+    // A long 0% hold is not feeding and must not pre-fill the jam window. The first stall sample
+    // after the positive-limit resume still needs the full 0.2 s confirmation.
     DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
     Shooting s = new Shooting(false);
     s.initialize();
@@ -1005,16 +1059,18 @@ class ShootingTest {
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
     Indexer.mInstance.periodic(); // the override must reach the input before the next execute
     for (int i = 0; i < 8; i++) {
+      injectIndexerVelocity(STALLED_INDEXER_ROTPS); // true-stall evidence for the classifier
       step(s);
       assertNotEquals("UNJAM", stateOf(s), "0% hold must not pre-fill the window, loop " + i);
     }
 
     boolean unjammed = false;
     for (int i = 0; i < 20 && !unjammed; i++) {
+      injectIndexerVelocity(STALLED_INDEXER_ROTPS);
       step(s);
       unjammed = stateOf(s).equals("UNJAM");
     }
-    assertTrue(unjammed, "sustained high current still trips UNJAM after the full window");
+    assertTrue(unjammed, "sustained stall evidence still trips UNJAM after the full window");
     s.end(true);
   }
 
@@ -1040,6 +1096,7 @@ class ShootingTest {
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
     Indexer.mInstance.periodic();
     for (int i = 0; i < 8; i++) {
+      injectIndexerVelocity(STALLED_INDEXER_ROTPS); // full stall samples, not yet 0.2 s
       step(s);
       assertNotEquals("UNJAM", stateOf(s), "no pause time pre-fills the window, loop " + i);
     }
@@ -1077,6 +1134,9 @@ class ShootingTest {
       if (shadowConfirmed) {
         DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
       }
+      // Near-zero speed every sample, so each shadow(true) is a genuine stall sample for the
+      // classifier too; otherwise the sim indexer tracks its healthy feed setpoint.
+      injectIndexerVelocity(STALLED_INDEXER_ROTPS);
       step(s);
       if (shadowConfirmed) {
         confirmed = true;
@@ -1085,7 +1145,7 @@ class ShootingTest {
             ShootingConstants.IndexerRotpsTunable.getAsDouble(),
             indexerSetpoint(),
             EPS,
-            "the confirmation is not complete at high-current sample " + sample);
+            "the confirmation is not complete at stall sample " + sample);
       }
     }
     assertTrue(confirmed, "found the confirmation sample");
@@ -1133,6 +1193,7 @@ class ShootingTest {
       Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
       boolean unjammed = false;
       for (int i = 0; i < 30 && !unjammed; i++) {
+        injectIndexerVelocity(STALLED_INDEXER_ROTPS); // true-stall evidence for the classifier
         step(s);
         unjammed = stateOf(s).equals("UNJAM");
       }

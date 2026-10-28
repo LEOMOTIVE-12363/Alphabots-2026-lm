@@ -158,6 +158,95 @@ class ShootingMeasurementFaultTest {
     overrideInput(Hood.mInstance, "positionRad", rot * 2.0 * Math.PI);
   }
 
+  // Hand-derived stall evidence speeds, independent of the production threshold constant: 20
+  // rot/s is a healthy feed speed (a quarter of the 80 rot/s target, far above any near-zero
+  // bound), 0.0 is a fully stalled indexer. Re-inject before every execute — the periodic inside
+  // step() refreshes the measured velocity from the sim, which tracks its healthy feed setpoint.
+  private static final double HEALTHY_INDEXER_ROTPS = 20.0;
+  private static final double STALLED_INDEXER_ROTPS = 0.0;
+
+  private static void injectIndexerVelocity(double rotPerSec) throws Exception {
+    overrideInput(Indexer.mInstance, "velocityRadPerSec", rotPerSec * 2.0 * Math.PI);
+  }
+
+  @Test
+  void highCurrentWhileIndexerIsTurningDoesNotUnjam() throws Exception {
+    Shooting s = new Shooting(false);
+    s.initialize();
+    assertTrue(stepUntilFeeding(s, 30), "reached SHOOT");
+
+    double drumTarget = Drum.mInstance.getVelocitySetpointRotPerSec();
+    Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
+    Indexer.mInstance.periodic(); // the override must reach the input before the next execute
+    try {
+      // 0.32 s of sustained high current — past the 0.2 s confirmation window — while the
+      // measured indexer speed stays healthy. Current alone is not a stall: the back-off must
+      // never reverse an indexer that is still turning.
+      for (int i = 0; i < 16; i++) {
+        injectIndexerVelocity(HEALTHY_INDEXER_ROTPS);
+        step(s);
+        assertNotEquals("UNJAM", stateOf(s), "a turning indexer must never enter UNJAM, loop " + i);
+        assertTrue(isFeeding(), "forward feeder request must not be withdrawn, loop " + i);
+        assertEquals(
+            ShootingConstants.IndexerRotpsTunable.getAsDouble(),
+            indexerSetpoint(),
+            EPS,
+            "indexer keeps its forward request, loop " + i);
+        assertEquals(
+            drumTarget,
+            Drum.mInstance.getVelocitySetpointRotPerSec(),
+            EPS,
+            "drum target unchanged, loop " + i);
+      }
+    } finally {
+      Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(null);
+    }
+    s.end(true);
+  }
+
+  @Test
+  void healthyIndexerSpeedResetsJamConfirmation() throws Exception {
+    Shooting s = new Shooting(false);
+    s.initialize();
+    assertTrue(stepUntilFeeding(s, 30), "reached SHOOT");
+
+    Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
+    Indexer.mInstance.periodic(); // the override must reach the input before the next execute
+    try {
+      // 0.16 s of high current at near-zero speed: still short of the 0.2 s window, so no UNJAM.
+      for (int i = 0; i < 8; i++) {
+        injectIndexerVelocity(STALLED_INDEXER_ROTPS);
+        step(s);
+        assertNotEquals("UNJAM", stateOf(s), "short of the confirmation window, loop " + i);
+      }
+
+      // One healthy-speed sample under the same high current feeds the debouncer a clear sample
+      // and must reset the confirmation timer.
+      injectIndexerVelocity(HEALTHY_INDEXER_ROTPS);
+      step(s);
+      assertNotEquals("UNJAM", stateOf(s), "a healthy sample never trips UNJAM");
+
+      // Back to near-zero speed: the pre-reset 0.16 s must not linger — a fresh full 0.2 s of
+      // consecutive stall samples is required, so another 0.16 s stays clear.
+      for (int i = 0; i < 8; i++) {
+        injectIndexerVelocity(STALLED_INDEXER_ROTPS);
+        step(s);
+        assertNotEquals("UNJAM", stateOf(s), "the pre-reset window must not count, loop " + i);
+      }
+
+      boolean unjammed = false;
+      for (int i = 0; i < 20 && !unjammed; i++) {
+        injectIndexerVelocity(STALLED_INDEXER_ROTPS);
+        step(s);
+        unjammed = stateOf(s).equals("UNJAM");
+      }
+      assertTrue(unjammed, "the fresh full stall window completes and trips UNJAM");
+    } finally {
+      Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(null);
+    }
+    s.end(true);
+  }
+
   @Test
   void measuredDrumSagDoesNotInterruptFeedAfterGateRelease() throws Exception {
     assertNull(Drive.mInstance, "test must run with no drivetrain / pose source");
@@ -463,6 +552,9 @@ class ShootingMeasurementFaultTest {
       for (int i = 0; i < 30 && !unjamming; i++) {
         Indexer.mInstance.periodic();
         injectDrumVelocity(DRUM_SAG_ROTPS);
+        // True-stall evidence: the sim indexer otherwise tracks its healthy feed setpoint, which
+        // the classifier must (correctly) refuse to call a jam.
+        injectIndexerVelocity(STALLED_INDEXER_ROTPS);
         step(s);
         unjamming = stateOf(s).equals("UNJAM");
       }

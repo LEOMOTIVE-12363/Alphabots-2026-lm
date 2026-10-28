@@ -20,6 +20,7 @@ import edu.wpi.first.wpilibj.simulation.DriverStationSim;
 import edu.wpi.first.wpilibj.simulation.SimHooks;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import frc.lib.bases.MotorSubsystem;
 import frc.lib.io.MotorIO;
 import frc.lib.rebuilt.ShiftUtil;
 import frc.robot.commands.ManualCommand.ManualConstants;
@@ -308,6 +309,20 @@ class TeleopIntegrationTest {
 
   private static double indexerSetpoint() {
     return Indexer.mInstance.getVelocitySetpointRotPerSec();
+  }
+
+  /**
+   * Zeroes the simulated indexer's velocity closed-loop target so the measured speed reads
+   * near-zero on the following loop — the low-speed half of the jam's stall evidence. Must run
+   * before each stepRobot() while a stall is wanted: inside the real scheduler the subsystem
+   * periodics precede the command's execute, so a direct write to the logged inputs would be
+   * overwritten before the jam check reads it. Every feeding execute re-writes the real 80 rot/s
+   * target, so the injection is self-clearing once the volley recovers.
+   */
+  private static void holdIndexerStallTarget() throws Exception {
+    var ioField = MotorSubsystem.class.getDeclaredField("io");
+    ioField.setAccessible(true);
+    ((MotorIO) ioField.get(Indexer.mInstance)).setVelocityRotPerSec(0.0);
   }
 
   /** Exposes requests written by the scheduler run that just finished, without another execute. */
@@ -1011,12 +1026,13 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void portOneRbResumesAfterRestabilizingPostUnjam() {
+  void portOneRbResumesAfterRestabilizingPostUnjam() throws Exception {
     startFeedingForSetup(1, BUTTON_RB);
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
     try {
       boolean reversing = false;
       for (int i = 0; i < 20 && !reversing; i++) {
+        holdIndexerStallTarget(); // near-zero measured speed: high current alone is not a stall
         stepRobot();
         refreshShotRequests();
         reversing = indexerSetpoint() < -EPS;

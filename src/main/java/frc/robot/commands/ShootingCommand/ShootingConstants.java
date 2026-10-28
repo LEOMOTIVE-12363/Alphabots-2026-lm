@@ -28,13 +28,22 @@ public final class ShootingConstants {
   // default 3 s) so it is operator-editable on the demo tab and power-cycle persistent like the
   // other Elastic settings (2026-10-27 acceptance fix).
 
-  // Indexer jam detection during SHOOT/RETRACT: stator current continuously above this threshold
-  // for the debounce time means a ball is stalled against the indexer (free-running feed draws far
-  // less; the config's stator limit is 100 A so a true stall does reach 90). NOTE: only the normal
-  // velocity-closed-loop feed can trip this — energy-save mode drives the indexer at 50 A torque
-  // current, which caps stator current below the threshold.
+  // Indexer jam detection during SHOOT/RETRACT: a ball is stalled against the indexer only when
+  // the stator current stays above this threshold AND the measured speed stays below the
+  // near-zero bound, together for the full debounce time (free-running feed draws far less
+  // current; the config's stator limit is 100 A so a true stall does reach 90). High current
+  // alone must not trip UNJAM — the indexer can draw hard while still turning — or the back-off
+  // would reverse a healthy feed. NOTE: only the normal velocity-closed-loop feed can trip this —
+  // energy-save mode drives the indexer at 50 A torque current, which caps stator current below
+  // the threshold.
   public static final double INDEXER_JAM_CURRENT_AMPS = 90.0;
   public static final double INDEXER_JAM_DEBOUNCE_SEC = 0.2;
+  // Near-zero speed bound of the stall classification, in mechanism rot/s. This is a documented
+  // preview value, not a calibrated measurement: 6.25% of the existing 80 rot/s feed target, so
+  // escaping it within the 0.2 s confirmation window takes 25 rot/s² — an acceleration healthy
+  // feeding far exceeds — while a truly stalled ball cannot move at all. Validate against real
+  // current+velocity traces before calling hardware tuning final (no field log was available).
+  public static final double INDEXER_JAM_MAX_VELOCITY_ROTPS = 5.0;
   // Unjam response: run the indexer backwards at this speed for this long, then resume the volley.
   public static final LoggedTunableNumber UNJAM_INDEXER_Current =
       new LoggedTunableNumber("Shooting/UnjamIndexerCurrent", 50);
