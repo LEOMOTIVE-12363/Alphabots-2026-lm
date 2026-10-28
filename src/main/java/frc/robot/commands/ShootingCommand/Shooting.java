@@ -67,9 +67,9 @@ public class Shooting extends Command {
   private boolean retractTimerStarted;
   private final boolean isEnergySave;
 
-  // Indexer jam detection: stator current must stay above the threshold for the full debounce
-  // time before UNJAM triggers. Only feeding loops count; SPIN_UP, PAUSED, and UNJAM feed clear
-  // samples.
+  // Indexer jam detection: a stall is high stator current AND near-zero measured speed, held for
+  // the full debounce time before UNJAM triggers. Only feeding loops count; SPIN_UP, PAUSED, and
+  // UNJAM feed clear samples.
   private Debouncer jamDebouncer;
   // Times the fixed backwards-run of the indexer in UNJAM.
   private final Timer unjamTimer = new Timer();
@@ -186,19 +186,26 @@ public class Shooting extends Command {
    * Feed the jam debouncer a clear sample without reading the mechanism. A kRising debouncer
    * re-anchors its timer only on baseline (clear) samples and lets it free-run otherwise, so every
    * non-feeding state must call this each loop: otherwise time spent spinning up, paused, or
-   * backing out a jam would silently count toward the confirmation window, and the first
-   * high-current sample after feeding resumed would trip UNJAM instantly instead of having to
-   * persist for the full debounce.
+   * backing out a jam would silently count toward the confirmation window, and the first stall
+   * sample after feeding resumed would trip UNJAM instantly instead of having to persist for the
+   * full debounce.
    */
   private void holdJamNotDetected() {
     jamDebouncer.calculate(false);
   }
 
-  /** True when the indexer stator current has been above the jam threshold for the debounce. */
+  /**
+   * True when the indexer has been stalled — stator current above the jam threshold AND measured
+   * speed near zero — continuously for the debounce window. Both conditions feed the debouncer as
+   * one sample, so a single healthy-speed sample re-anchors the window, and high current while the
+   * indexer keeps turning can never trip UNJAM.
+   */
   private boolean isIndexerJammed() {
-    boolean jammed =
-        jamDebouncer.calculate(
-            Indexer.mInstance.getStatorCurrentAmps() > ShootingConstants.INDEXER_JAM_CURRENT_AMPS);
+    boolean stalled =
+        Indexer.mInstance.getStatorCurrentAmps() > ShootingConstants.INDEXER_JAM_CURRENT_AMPS
+            && Math.abs(Indexer.mInstance.getVelocityRotPerSec())
+                < ShootingConstants.INDEXER_JAM_MAX_VELOCITY_ROTPS;
+    boolean jammed = jamDebouncer.calculate(stalled);
     Logger.recordOutput("Shooting/indexerJammed", jammed);
     return jammed;
   }
@@ -392,7 +399,7 @@ public class Shooting extends Command {
     Indexer.mInstance.setV(0);
     Feeder.mInstance.setV(0);
     // Spin-up is not feeding: keep the jam debouncer anchored, or a long real spin-up would
-    // pre-fill the confirmation window and the first high-current sample would trip UNJAM.
+    // pre-fill the confirmation window and the first stall sample would trip UNJAM.
     holdJamNotDetected();
 
     if (lastEvaluation.stableReady()) {
