@@ -19,10 +19,12 @@ import edu.wpi.first.networktables.NetworkTableType;
 import edu.wpi.first.wpilibj.simulation.DriverStationSim;
 import edu.wpi.first.wpilibj.simulation.SimHooks;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import frc.lib.bases.MotorSubsystem;
 import frc.lib.io.MotorIO;
 import frc.lib.rebuilt.ShiftUtil;
+import frc.robot.commands.DriveCommands.DriveCommands;
 import frc.robot.commands.ManualCommand.ManualConstants;
 import frc.robot.commands.ShootingCommand.ShootingConstants;
 import frc.robot.simulation.MapleSimArena;
@@ -757,6 +759,42 @@ class TeleopIntegrationTest {
     setAxis(1, AXIS_LEFT_Y, 0.0);
   }
 
+  // ---------------------------------------------------------------------------
+  // Goal-finishing heading command (direct-command scheduling, zero translation)
+  // ---------------------------------------------------------------------------
+
+  @Test
+  void joystickDriveToAngleConvergesFinishesAndDefaultDriveResumes() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(1); // the resumed default command reads its axes from the active pad
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.fromDegrees(45)));
+
+    Rotation2d target = Rotation2d.fromDegrees(90);
+    Command finishing =
+        DriveCommands.joystickDriveToAngle(Drive.mInstance, () -> 0.0, () -> 0.0, () -> target);
+    CommandScheduler.getInstance().schedule(finishing);
+
+    // The angle profile moves 45 deg in well under a second; 250 loops = 5 s is a generous
+    // bound for advancing maple-sim until completion.
+    int loops = 0;
+    while (finishing.isScheduled() && loops < 250) {
+      stepRobot();
+      loops++;
+    }
+    assertFalse(
+        finishing.isScheduled(),
+        "the command finished via its own atGoal after " + loops + " loops");
+    double errorDeg = Math.abs(pose().getRotation().minus(target).getDegrees());
+    assertTrue(errorDeg < 6.0, "converged to the requested angle, error " + errorDeg + " deg");
+
+    // Resumption of the normal default drive: the stick (ignored while the finishing command
+    // owned Drive) moves the robot field-forward again.
+    setAxis(1, AXIS_LEFT_Y, -1.0);
+    double meanVx = mean(40, s -> s.vxMetersPerSecond);
+    assertTrue(meanVx > 0.5, "default drive resumed after the finish, mean vx=" + meanVx);
+    setAxis(1, AXIS_LEFT_Y, 0.0);
+  }
+
   @Test
   void headingHoldTracksManualTurnReleaseAndRejectsDisturbance() {
     setAlliance(AllianceStationID.Blue1);
@@ -1026,6 +1064,28 @@ class TeleopIntegrationTest {
     }
     assertTrue(rolling, "the gate released and the robot drives forward");
     DriverStationSim.setJoystickAxis(1, AXIS_LEFT_Y, 0.0);
+  }
+
+  @Test
+  void joystickDriveAtAngleRemainsContinuousRatherThanFinishing() {
+    setAlliance(AllianceStationID.Blue1);
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.fromDegrees(45)));
+
+    Rotation2d target = Rotation2d.fromDegrees(90);
+    Command continuous =
+        DriveCommands.joystickDriveAtAngle(Drive.mInstance, () -> 0.0, () -> 0.0, () -> target);
+    CommandScheduler.getInstance().schedule(continuous);
+
+    // 5 s is far beyond what the same profile needs to reach its goal (the finishing variant
+    // completes in a fraction of it): the existing API must still never finish on its own.
+    for (int i = 0; i < 250; i++) {
+      stepRobot();
+    }
+    double errorDeg = Math.abs(pose().getRotation().minus(target).getDegrees());
+    assertTrue(errorDeg < 6.0, "the at-angle command still converges, error " + errorDeg + " deg");
+    assertTrue(continuous.isScheduled(), "joystickDriveAtAngle stays continuous (perpetual)");
+
+    CommandScheduler.getInstance().cancel(continuous);
   }
 
   // ---------------------------------------------------------------------------

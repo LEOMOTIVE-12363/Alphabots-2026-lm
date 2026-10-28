@@ -145,8 +145,26 @@ public class DriveCommands {
       DoubleSupplier xSupplier,
       DoubleSupplier ySupplier,
       Supplier<Rotation2d> rotationSupplier) {
+    ProfiledPIDController angleController = newAngleController();
+    return angleDrive(drive, xSupplier, ySupplier, rotationSupplier, angleController);
+  }
 
-    // Create PID controller
+  /**
+   * Field relative drive command using joystick for linear control and PID for angular control,
+   * finishing when its angle controller reaches the goal. The drive's default command resumes once
+   * it ends.
+   */
+  public static Command joystickDriveToAngle(
+      Drive drive,
+      DoubleSupplier xSupplier,
+      DoubleSupplier ySupplier,
+      Supplier<Rotation2d> rotationSupplier) {
+    ProfiledPIDController angleController = newAngleController();
+    return angleDrive(drive, xSupplier, ySupplier, rotationSupplier, angleController)
+        .until(angleController::atGoal);
+  }
+
+  private static ProfiledPIDController newAngleController() {
     ProfiledPIDController angleController =
         new ProfiledPIDController(
             DriveCommandsConstants.ANGLE_KP,
@@ -156,6 +174,15 @@ public class DriveCommands {
                 DriveCommandsConstants.ANGLE_MAX_VELOCITY,
                 DriveCommandsConstants.ANGLE_MAX_ACCELERATION));
     angleController.enableContinuousInput(-Math.PI, Math.PI);
+    return angleController;
+  }
+
+  private static Command angleDrive(
+      Drive drive,
+      DoubleSupplier xSupplier,
+      DoubleSupplier ySupplier,
+      Supplier<Rotation2d> rotationSupplier,
+      ProfiledPIDController angleController) {
 
     // Construct command
     return Commands.run(
