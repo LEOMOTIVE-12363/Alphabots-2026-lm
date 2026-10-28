@@ -63,7 +63,7 @@ public class RobotContainer {
   private final IntakeRoller intakeRoller = IntakeRoller.mInstance;
   private final LED led = LED.mInstance;
 
-  // Port 1 is the preferred demo controller; port 0 retains the full original controls.
+  // Port 1 is the preferred demo controller; port 0 provides the full control set.
   private final DriverControls controls = new DriverControls();
 
   // Latched intake (2026-10-26; intent model since 2026-10-27, decisions 0016→0022→0023): LT is

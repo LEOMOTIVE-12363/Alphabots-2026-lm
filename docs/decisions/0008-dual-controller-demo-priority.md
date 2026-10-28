@@ -148,3 +148,13 @@ LED output. `LED Effective State` and `LED Flow Direction` are read-only
 mechanism diagnostics, not the actual light effect or direction. Controller
 routing, bindings, reverse behavior, commands, and `OperatorStatus` are
 unchanged by this revision.
+
+## Revision 2026-10-28 — D-pad headings and X retract
+
+The current D-pad and X bindings are revised by
+[0028](0028-dpad-heading-snap-and-x-intake-retract.md): all four cardinal
+D-pad directions start heading snaps on both controllers, the old up/down
+flywheel nudges and D-pad-left retract are removed, and port-0 X now runs
+inward intake homing instead of `Manual`. The `Manual` command remains
+implemented but has no controller binding. The binding lists above are
+retained as the historical record of the original dual-controller routing.

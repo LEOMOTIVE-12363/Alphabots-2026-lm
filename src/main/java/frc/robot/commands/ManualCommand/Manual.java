@@ -15,21 +15,22 @@ import frc.robot.util.ShotReadiness;
 import org.littletonrobotics.junction.Logger;
 
 /**
- * X-button fixed-setpoint shot path. Every execute drives the drum and hood to the current Manual
- * targets. Initial feeding waits for the measured Manual speed target to hold the 0.15 s stable
- * window with a positive flywheel limit; after that permit is earned, mid-volley speed sag and
- * nonzero target edits do not interrupt feeding. A 0% limit stops the feed path immediately and
- * requires a fresh speed window on recovery unless force-feed is active. The hood never gates
- * feeding. The same force-feed timeout as Shooting applies: waiting at a positive limit for the
- * configured timeout (default 3 s, Elastic-persisted via DashboardControls) latches the speed gate
- * off for the rest of the press, so balls always come out.
+ * Fixed-setpoint shot path with no physical controller binding; it remains directly schedulable.
+ * Every execute drives the drum and hood to the current Manual targets. Initial feeding waits for
+ * the measured Manual speed target to hold the 0.15 s stable window with a positive flywheel limit;
+ * after that permit is earned, mid-volley speed sag and nonzero target edits do not interrupt
+ * feeding. A 0% limit stops the feed path immediately and requires a fresh speed window on recovery
+ * unless force-feed is active. The hood never gates feeding. The same force-feed timeout as
+ * Shooting applies: waiting at a positive limit for the configured timeout (default 3 s,
+ * Elastic-persisted via DashboardControls) latches the speed gate off for the rest of the command
+ * run, so balls always come out.
  */
 public class Manual extends Command {
-  // Shared readiness rule with this command's own debounce, so a fresh press re-earns the full
-  // stable window against the Manual targets.
+  // Shared readiness rule with this command's own debounce, so each run re-earns the full stable
+  // window against the Manual targets.
   private final ShotReadiness readiness = new ShotReadiness();
   private ShotReadiness.Evaluation lastEvaluation;
-  // Force-feed timeout accumulator (positive-limit waiting only) and latch, reset per press.
+  // Force-feed timeout accumulator (positive-limit waiting only) and latch, reset per run.
   private final Timer gateWaitTimer = new Timer();
   private boolean forceFeedActive;
   // Normal mid-volley speed sag must not retract an already earned startup permit. A 0% edit does
