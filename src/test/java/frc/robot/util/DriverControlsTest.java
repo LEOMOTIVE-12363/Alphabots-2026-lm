@@ -245,21 +245,18 @@ class DriverControlsTest {
   void fullOnlyActionsNeverFireOnDemoPort() {
     DriverControls controls = new DriverControls();
     Probe a = new Probe(true);
-    Probe x = new Probe(true);
+    Probe retract0 = new Probe(true);
+    Probe retract1 = new Probe(true);
     Probe y = new Probe(true);
     Probe start = new Probe(true);
-    Probe povUp = new Probe(true);
-    Probe povDown = new Probe(true);
     Probe rightTrigger = new Probe(true);
     controls.onPress(Action.CURRENT_FEED_SHOOT, new ProbeFactory(a));
-    controls.onPress(Action.MANUAL_SHOOT, new ProbeFactory(x));
+    controls.onPress(Action.RETRACT, new ProbeFactory(retract0, retract1));
     controls.onPress(Action.ZERO_OUTWARD, new ProbeFactory(y));
     controls.onPress(Action.RESET_SIM, new ProbeFactory(start));
-    controls.onPress(Action.FLYWHEEL_UP, new ProbeFactory(povUp));
-    controls.onPress(Action.FLYWHEEL_DOWN, new ProbeFactory(povDown));
     controls.onPress(Action.REVERSE_FEED, new ProbeFactory(rightTrigger));
 
-    // Every full-only input on port 1: none may fire.
+    // Full-only inputs on port 1 never fire; cardinal POVs must not fire RETRACT either.
     connect(DriverControls.DEMO_PORT);
     pressButton(DriverControls.DEMO_PORT, BUTTON_A);
     pressButton(DriverControls.DEMO_PORT, BUTTON_X);
@@ -267,18 +264,18 @@ class DriverControlsTest {
     pressButton(DriverControls.DEMO_PORT, BUTTON_START);
     setPov(DriverControls.DEMO_PORT, 0);
     setPov(DriverControls.DEMO_PORT, 180);
+    setPov(DriverControls.DEMO_PORT, 270);
     setPov(DriverControls.DEMO_PORT, -1);
     DriverStationSim.setJoystickAxis(DriverControls.DEMO_PORT, AXIS_RIGHT_TRIGGER, 1.0);
     runLoop();
     assertFalse(a.started(), "A must not fire on port 1");
-    assertFalse(x.started(), "X must not fire on port 1");
+    assertFalse(retract0.started(), "port 1 X must not fire the port 0 RETRACT instance");
+    assertFalse(retract1.started(), "RETRACT is full-only X, not a demo POV action");
     assertFalse(y.started(), "Y must not fire on port 1");
     assertFalse(start.started(), "the RESET_SIM Start binding must not fire on port 1");
-    assertFalse(povUp.started(), "D-pad up must not fire on port 1");
-    assertFalse(povDown.started(), "D-pad down must not fire on port 1");
     assertFalse(rightTrigger.started(), "RT must not fire on port 1");
 
-    // The same inputs on port 0 (now the only controller): all fire.
+    // The same full-only inputs on port 0 fire; POV left is not another RETRACT binding.
     disconnect(DriverControls.DEMO_PORT);
     connect(DriverControls.FULL_PORT);
     pressButton(DriverControls.FULL_PORT, BUTTON_A);
@@ -287,15 +284,15 @@ class DriverControlsTest {
     pressButton(DriverControls.FULL_PORT, BUTTON_START);
     setPov(DriverControls.FULL_PORT, 0);
     setPov(DriverControls.FULL_PORT, 180);
+    setPov(DriverControls.FULL_PORT, 270);
     setPov(DriverControls.FULL_PORT, -1);
     DriverStationSim.setJoystickAxis(DriverControls.FULL_PORT, AXIS_RIGHT_TRIGGER, 1.0);
     runLoop();
     assertEquals(1, a.initializeCount);
-    assertEquals(1, x.initializeCount);
+    assertEquals(1, retract0.initializeCount, "port 0 X fires RETRACT exactly once");
+    assertFalse(retract1.started(), "the demo RETRACT instance stays unused");
     assertEquals(1, y.initializeCount);
     assertEquals(1, start.initializeCount);
-    assertEquals(1, povUp.initializeCount);
-    assertEquals(1, povDown.initializeCount);
     assertEquals(1, rightTrigger.initializeCount);
   }
 
@@ -362,17 +359,17 @@ class DriverControlsTest {
   }
 
   @Test
-  void oneShotLongCommandCancelsOnDisconnect() {
+  void retractOneShotLongCommandCancelsOnDisconnect() {
     DriverControls controls = new DriverControls();
     Probe port0 = new Probe(false);
     Probe port1 = new Probe(false);
     controls.onPress(Action.RETRACT, new ProbeFactory(port0, port1));
 
-    connect(DriverControls.DEMO_PORT);
-    setPov(DriverControls.DEMO_PORT, 270);
-    assertTrue(port1.running(), "long one-shot started via D-pad left");
-    disconnect(DriverControls.DEMO_PORT);
-    assertEquals(Boolean.TRUE, port1.endedInterrupted, "disconnect interrupts the one-shot");
+    connect(DriverControls.FULL_PORT);
+    pressButton(DriverControls.FULL_PORT, BUTTON_X);
+    assertTrue(port0.running(), "long inward homing one-shot started via port 0 X");
+    disconnect(DriverControls.FULL_PORT);
+    assertEquals(Boolean.TRUE, port0.endedInterrupted, "disconnect interrupts the one-shot");
   }
 
   @Test

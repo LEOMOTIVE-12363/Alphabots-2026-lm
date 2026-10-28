@@ -8,6 +8,7 @@ import edu.wpi.first.wpilibj.simulation.DriverStationSim;
 import edu.wpi.first.wpilibj.simulation.SimHooks;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import frc.robot.RobotContainer;
+import frc.robot.commands.ManualCommand.Manual;
 import frc.robot.subsystems.Feeder.Feeder;
 import frc.robot.subsystems.Indexer.Indexer;
 import frc.robot.subsystems.IntakeRoller.IntakeRoller;
@@ -30,7 +31,6 @@ import org.junit.jupiter.api.Test;
  */
 class DriverControlsIntegrationAcceptanceTest {
   private static final int BUTTON_A = 1;
-  private static final int BUTTON_X = 3;
   private static final int BUTTON_LB = 5;
   private static final int AXIS_RIGHT_TRIGGER = 3;
   private static final double EPS = 1e-6;
@@ -230,24 +230,27 @@ class DriverControlsIntegrationAcceptanceTest {
 
   @Test
   void acceptanceTakeoverFromManualKeepsNewOwnersReverse() {
-    // Port 0 holds X (Manual running); port 1 connects already holding LB. The outgoing Manual's
-    // end() zeroes the feeder/indexer/roller in the same loop — the new owner's reverse must still
-    // win, with no re-press.
-    acceptanceTakeoverFromShootingKeepsNewOwnersReverse(BUTTON_X);
+    // Directly scheduled Manual retains the old port-0 ownership gate. Port 1 connects already
+    // holding LB: outgoing end() zeroes the path in the same loop, and the new reverse must win.
+    connected(DriverControls.FULL_PORT, true);
+    loop();
+    new Manual().onlyWhile(() -> controls.activePort() == DriverControls.FULL_PORT).schedule();
+    loop();
+    assertTakeoverKeepsNewOwnersReverse();
   }
 
   @Test
   void acceptanceTakeoverFromCurrentFeedKeepsNewOwnersReverse() {
     // Same takeover, but the outgoing command is A = Shooting(true) (current-feed).
-    acceptanceTakeoverFromShootingKeepsNewOwnersReverse(BUTTON_A);
-  }
-
-  private void acceptanceTakeoverFromShootingKeepsNewOwnersReverse(int fullPadButton) {
     connected(DriverControls.FULL_PORT, true);
     loop();
-    DriverStationSim.setJoystickButton(DriverControls.FULL_PORT, fullPadButton, true);
+    DriverStationSim.setJoystickButton(DriverControls.FULL_PORT, BUTTON_A, true);
     loop();
     loop();
+    assertTakeoverKeepsNewOwnersReverse();
+  }
+
+  private void assertTakeoverKeepsNewOwnersReverse() {
     connected(DriverControls.DEMO_PORT, true);
     DriverStationSim.setJoystickButton(DriverControls.DEMO_PORT, BUTTON_LB, true);
     loop();

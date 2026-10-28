@@ -5,6 +5,7 @@ import static frc.robot.util.DashboardControlsTestUtil.HOOD;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -19,10 +20,14 @@ import edu.wpi.first.networktables.NetworkTableType;
 import edu.wpi.first.wpilibj.simulation.DriverStationSim;
 import edu.wpi.first.wpilibj.simulation.SimHooks;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import frc.lib.bases.MotorSubsystem;
 import frc.lib.io.MotorIO;
 import frc.lib.rebuilt.ShiftUtil;
+import frc.robot.commands.DriveCommands.DriveCommands;
+import frc.robot.commands.DriveCommands.DriveCommandsConstants;
+import frc.robot.commands.ManualCommand.Manual;
 import frc.robot.commands.ManualCommand.ManualConstants;
 import frc.robot.commands.ShootingCommand.ShootingConstants;
 import frc.robot.simulation.MapleSimArena;
@@ -458,6 +463,14 @@ class TeleopIntegrationTest {
     return false;
   }
 
+  /** Establishes the same Manual behavior without relying on its removed physical binding. */
+  private static Command startManualFeedingForSetup() {
+    Command manual = new Manual();
+    manual.schedule();
+    assertTrue(stepUntilManualFeeding(40), "directly scheduled Manual feeds for the test setup");
+    return manual;
+  }
+
   private static String robotAction() {
     return NetworkTableInstance.getDefault()
         .getEntry("/SmartDashboard/Robot Action")
@@ -757,6 +770,45 @@ class TeleopIntegrationTest {
     setAxis(1, AXIS_LEFT_Y, 0.0);
   }
 
+  // ---------------------------------------------------------------------------
+  // Goal-finishing heading command (direct-command scheduling, zero translation)
+  // ---------------------------------------------------------------------------
+
+  @Test
+  void joystickDriveToAngleConvergesFinishesAndDefaultDriveResumes() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(1); // the resumed default command reads its axes from the active pad
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.fromDegrees(45)));
+
+    Rotation2d target = Rotation2d.fromDegrees(90);
+    Command finishing =
+        DriveCommands.joystickDriveToAngle(Drive.mInstance, () -> 0.0, () -> 0.0, () -> target);
+    CommandScheduler.getInstance().schedule(finishing);
+
+    // The angle profile moves 45 deg in well under a second; 250 loops = 5 s is a generous
+    // bound for advancing maple-sim until completion.
+    int loops = 0;
+    while (finishing.isScheduled() && loops < 250) {
+      stepRobot();
+      loops++;
+    }
+    assertFalse(
+        finishing.isScheduled(),
+        "the command finished via its own atGoal after " + loops + " loops");
+    double errorDeg = Math.abs(pose().getRotation().minus(target).getDegrees());
+    assertTrue(errorDeg < 6.0, "converged to the requested angle, error " + errorDeg + " deg");
+
+    // Resumption of the normal default drive: the stick (ignored while the finishing command
+    // owned Drive) moves the robot field-forward again.
+    setAxis(1, AXIS_LEFT_Y, -1.0);
+    double meanVx =
+        mean(
+            40,
+            s -> ChassisSpeeds.fromRobotRelativeSpeeds(s, pose().getRotation()).vxMetersPerSecond);
+    assertTrue(meanVx > 0.5, "default drive resumed after the finish, mean field vx=" + meanVx);
+    setAxis(1, AXIS_LEFT_Y, 0.0);
+  }
+
   @Test
   void headingHoldTracksManualTurnReleaseAndRejectsDisturbance() {
     setAlliance(AllianceStationID.Blue1);
@@ -1028,6 +1080,169 @@ class TeleopIntegrationTest {
     DriverStationSim.setJoystickAxis(1, AXIS_LEFT_Y, 0.0);
   }
 
+  @Test
+  void joystickDriveAtAngleRemainsContinuousRatherThanFinishing() {
+    setAlliance(AllianceStationID.Blue1);
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.fromDegrees(45)));
+
+    Rotation2d target = Rotation2d.fromDegrees(90);
+    Command continuous =
+        DriveCommands.joystickDriveAtAngle(Drive.mInstance, () -> 0.0, () -> 0.0, () -> target);
+    CommandScheduler.getInstance().schedule(continuous);
+
+    // 5 s is far beyond what the same profile needs to reach its goal (the finishing variant
+    // completes in a fraction of it): the existing API must still never finish on its own.
+    for (int i = 0; i < 250; i++) {
+      stepRobot();
+    }
+    double errorDeg = Math.abs(pose().getRotation().minus(target).getDegrees());
+    assertTrue(errorDeg < 6.0, "the at-angle command still converges, error " + errorDeg + " deg");
+    assertTrue(continuous.isScheduled(), "joystickDriveAtAngle stays continuous (perpetual)");
+
+    CommandScheduler.getInstance().cancel(continuous);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Real D-pad heading and port-0 X retract bindings
+  // ---------------------------------------------------------------------------
+
+  @Test
+  void blueDpadSnapSequenceWorksOnFullPortAndContinuesAfterRelease() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.fromDegrees(45)));
+    assertDpadSnapSequence(0, new int[] {0, 180, 270, 90}, new double[] {0, 180, 90, -90});
+  }
+
+  @Test
+  void redDpadSnapSequenceWorksOnDemoPortAndContinuesAfterRelease() {
+    setAlliance(AllianceStationID.Red1);
+    connect(1);
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.fromDegrees(45)));
+    assertDpadSnapSequence(1, new int[] {0, 180, 270, 90}, new double[] {180, 0, -90, 90});
+  }
+
+  private static void assertDpadSnapSequence(int port, int[] povs, double[] targetsDeg) {
+    for (int i = 0; i < povs.length; i++) {
+      setPov(port, povs[i]);
+      setPov(port, -1); // onPress owns the snap; releasing POV must not cancel convergence.
+      for (int loop = 0; loop < 250; loop++) {
+        stepRobot();
+      }
+      double errorDeg =
+          Math.abs(pose().getRotation().minus(Rotation2d.fromDegrees(targetsDeg[i])).getDegrees());
+      assertTrue(
+          errorDeg < 6.0,
+          "port "
+              + port
+              + " POV "
+              + povs[i]
+              + " must converge to "
+              + targetsDeg[i]
+              + " degrees after release; error="
+              + errorDeg);
+    }
+  }
+
+  @Test
+  void rightStickBeyondDeadbandCancelsInProgressSnap() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.kZero));
+    setPov(0, 180);
+    Command snap = CommandScheduler.getInstance().requiring(Drive.mInstance);
+    assertNotNull(snap, "POV down starts a drive-owning snap");
+
+    setAxis(0, AXIS_RIGHT_X, DriveCommandsConstants.DEADBAND + 0.2);
+    assertNotSame(
+        snap,
+        CommandScheduler.getInstance().requiring(Drive.mInstance),
+        "right-stick manual rotation cancels the snap and restores default drive");
+    setAxis(0, AXIS_RIGHT_X, 0.0);
+    for (int i = 0; i < 100; i++) {
+      stepRobot();
+    }
+    double errorDeg = Math.abs(pose().getRotation().minus(Rotation2d.kPi).getDegrees());
+    assertTrue(errorDeg > 60.0, "cancelled snap must not keep driving toward 180 degrees");
+  }
+
+  @Test
+  void disconnectCancelsInProgressSnap() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.kZero));
+    setPov(0, 180);
+    Command snap = CommandScheduler.getInstance().requiring(Drive.mInstance);
+
+    disconnect(0);
+    assertNotSame(
+        snap,
+        CommandScheduler.getInstance().requiring(Drive.mInstance),
+        "disconnect cancels the old source's snap");
+  }
+
+  @Test
+  void portOneTakeoverCancelsPortZeroSnap() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.kZero));
+    setPov(0, 180);
+    Command snap = CommandScheduler.getInstance().requiring(Drive.mInstance);
+
+    connect(1);
+    assertNotSame(
+        snap,
+        CommandScheduler.getInstance().requiring(Drive.mInstance),
+        "port-1 priority cancels port 0's snap");
+  }
+
+  @Test
+  void dpadLeftSnapsWithoutStartingIntakeHoming() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(1);
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.kZero));
+    setPov(1, 270);
+    double volts = 0.0;
+    for (int i = 0; i < 3; i++) {
+      stepRobot();
+      volts = IntakeDeploy.mInstance.getVoltageSetpoint();
+    }
+    assertEquals(0.0, volts, EPS, "POV left is a heading snap, not intake homing");
+    setPov(1, -1);
+  }
+
+  @Test
+  void xStartsPortZeroInwardRetractWithoutManualAndDoesNothingOnPortOne() {
+    connect(0);
+    press(0, BUTTON_X);
+    double volts = 0.0;
+    for (int i = 0; i < 3; i++) {
+      stepRobot();
+      volts = IntakeDeploy.mInstance.getVoltageSetpoint();
+    }
+    refreshShotRequests();
+    assertTrue(volts < -0.5, "port 0 X drives inward intake homing, volts=" + volts);
+    assertEquals(
+        0.0,
+        Drum.mInstance.getVelocitySetpointRotPerSec(),
+        EPS,
+        "X retract must not start Manual's drum request");
+    assertFeedPathStopped();
+
+    disconnect(0);
+    connect(1);
+    press(1, BUTTON_X);
+    for (int i = 0; i < 3; i++) {
+      stepRobot();
+    }
+    assertEquals(
+        0.0,
+        IntakeDeploy.mInstance.getVoltageSetpoint(),
+        EPS,
+        "port 1 X must not start intake homing");
+    release(1, BUTTON_X);
+  }
+
   // ---------------------------------------------------------------------------
   // Item 8: dual-controller routing through the real bindings
   // ---------------------------------------------------------------------------
@@ -1122,7 +1337,7 @@ class TeleopIntegrationTest {
   void portOneUnboundKeysTriggerNothing() {
     arrangeUnreadyShot();
     connect(1);
-    // X (Manual), A (current-feed Shooting), Y (zeroing) exist on port 0 only.
+    // X (retract), A (current-feed Shooting), Y (zeroing) exist on port 0 only.
     press(1, BUTTON_X);
     refreshShotRequests();
     assertFeedPathStopped();
@@ -1211,9 +1426,23 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void portZeroXManualWaitsForFlywheelSpeedThenFeeds() {
-    pressWithUnreadyShot(0, BUTTON_X);
+  void directManualWaitsForFlywheelSpeedThenFeeds() {
+    connect(0);
+    arrangeUnreadyShot();
+    assertEquals(0.0, Drum.mInstance.getVelocityRotPerSec(), EPS, "drum starts stopped");
+    assertEquals(0.05, Hood.mInstance.getPositionRot(), EPS, "hood starts off target");
 
+    Command manual = new Manual();
+    manual.schedule();
+    stepRobot();
+    assertEquals(
+        0.0,
+        Drum.mInstance.getVelocityRotPerSec(),
+        EPS,
+        "the first execute saw the stopped drum, not a ready measurement");
+    assertEquals(
+        0.05, Hood.mInstance.getPositionRot(), EPS, "the first execute saw the off-target hood");
+    refreshShotRequests();
     assertFeedPathStopped();
     assertEquals(
         ManualConstants.ShooterRotpsTunable.getAsDouble(),
@@ -1228,7 +1457,7 @@ class TeleopIntegrationTest {
     assertVelocityFeed(
         ManualConstants.IndexerRotpsTunable.getAsDouble(),
         ManualConstants.FeederRotpsTunable.getAsDouble());
-    release(0, BUTTON_X);
+    manual.cancel();
     settle();
   }
 
@@ -1302,8 +1531,9 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void portZeroXZeroStopPositiveResumeAfterSpeedWindow() {
-    startFeedingForSetup(0, BUTTON_X);
+  void directManualZeroStopPositiveResumeAfterSpeedWindow() {
+    connect(0);
+    Command manual = startManualFeedingForSetup();
     DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
     stepRobot();
     refreshShotRequests();
@@ -1318,7 +1548,7 @@ class TeleopIntegrationTest {
     assertVelocityFeed(
         ManualConstants.IndexerRotpsTunable.getAsDouble(),
         ManualConstants.FeederRotpsTunable.getAsDouble());
-    release(0, BUTTON_X);
+    manual.cancel();
     settle();
   }
 
@@ -1528,31 +1758,32 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void releaseDuringZeroStopDoesNotAutoResumeManual() {
-    connect(0); // X = Manual exists on port 0 only
-    press(0, BUTTON_X);
-    assertTrue(stepUntilManualFeeding(40), "Manual feeds via the X binding");
+  void cancelledZeroStoppedManualDoesNotAutoResumeAndDirectRestartWorks() {
+    connect(0);
+    Command manual = startManualFeedingForSetup();
 
     DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
     stepRobot();
     settle();
     assertEquals(0.0, feederSetpoint(), EPS, "Manual stopped on the zero-limit loop");
 
-    release(0, BUTTON_X);
+    manual.cancel();
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
     for (int i = 0; i < 25; i++) {
       stepRobot();
       assertEquals(0.0, feederSetpoint(), EPS, "Manual never auto-resumes, loop " + i);
     }
 
-    press(0, BUTTON_X);
+    Command restarted = new Manual();
+    restarted.schedule();
+    stepRobot();
     refreshShotRequests();
     assertFeedPathStopped();
-    assertTrue(stepUntilManualFeeding(40), "fresh Manual press feeds after the speed window");
+    assertTrue(stepUntilManualFeeding(40), "fresh Manual run feeds after the speed window");
     assertVelocityFeed(
         ManualConstants.IndexerRotpsTunable.getAsDouble(),
         ManualConstants.FeederRotpsTunable.getAsDouble());
-    release(0, BUTTON_X);
+    restarted.cancel();
   }
 
   @Test
@@ -1791,9 +2022,9 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void homingCommandStopsWhenItsControllerDisconnects() {
-    connect(1);
-    setPov(1, 270); // D-pad left: IntakeDeployZeroCommand (long one-shot homing)
+  void xRetractHomingStopsWhenItsControllerDisconnects() {
+    connect(0);
+    press(0, BUTTON_X); // port 0 X: IntakeDeployZeroCommand (long one-shot inward homing)
     // Sample early: in sim the modeled stall current can satisfy the 0.15 s spike debounce and
     // finish the homing on its own, which is fine — the disconnect must stop it before that.
     double volts = 0;
@@ -1803,14 +2034,13 @@ class TeleopIntegrationTest {
     }
     assertTrue(Math.abs(volts) > 0.5, "homing drives the deploy motor, volts=" + volts);
 
-    disconnect(1);
+    disconnect(0);
     settle();
     assertEquals(
         0.0,
         IntakeDeploy.mInstance.getVoltageSetpoint(),
         EPS,
         "homing command ended on disconnect, motor stopped");
-    setPov(1, -1);
   }
 
   @Test
@@ -2072,7 +2302,9 @@ class TeleopIntegrationTest {
       stepRobot();
       settle();
 
-      press(0, BUTTON_X);
+      Command manual = new Manual();
+      manual.schedule();
+      stepRobot();
       settle();
       assertHoodPositionTarget(
           5.0 / 360.0, "Manual must keep its own 5 degree target, not the dashboard's 45 degrees");
@@ -2083,7 +2315,8 @@ class TeleopIntegrationTest {
       assertHoodPositionTarget(
           5.0 / 360.0, "a dashboard edit must not preempt the active Manual command");
 
-      release(0, BUTTON_X);
+      manual.cancel();
+      stepRobot(); // same cancellation-loop + two settle loops as the former release helper
       settle();
       settle();
       assertHoodPositionTarget(
@@ -2261,10 +2494,10 @@ class TeleopIntegrationTest {
   // ---------------------------------------------------------------------------
 
   @Test
-  void portOneDpadUpDownAndStartDoNotTriggerFullOnlyActions() throws InterruptedException {
-    // D-pad up/down (flywheel nudge) and Start (sim field reset) are full-port-only actions; on
-    // the demo pad neither full-only action may fire. Start may still cycle the LED idle effect
-    // through its separate demo binding; the flywheel entry and pose check the two full-only paths.
+  void dpadUpDownDoNotNudgeFlywheelOnEitherPortAndDemoStartDoesNotResetSim()
+      throws InterruptedException {
+    // POV up/down are heading snaps on both pads, never flywheel nudges. Demo Start may still
+    // cycle the LED idle effect, but must not trigger the full pad's sim-reset action.
     connect(1);
     teleport(new Pose2d(3.0, 2.0, Rotation2d.kZero));
     settleToPublish();
@@ -2272,9 +2505,8 @@ class TeleopIntegrationTest {
         NetworkTableInstance.getDefault().getEntry("/SmartDashboard/Flywheel Speed Limit (%)");
     double flywheelBefore = flywheelEntry.getDouble(-1);
 
-    setPov(1, 0); // up
-    setPov(1, 180); // down — the observable one: at the 100% default, an up-nudge would clamp
-    // back to 100 invisibly, so a wrongly-bound DOWN is what this check can catch.
+    setPov(1, 0);
+    setPov(1, 180);
     press(1, 8); // Start
     for (int i = 0; i < 10; i++) stepRobot();
     assertEquals(
@@ -2287,22 +2519,22 @@ class TeleopIntegrationTest {
     release(1, 8);
     setPov(1, -1);
 
-    // Positive control on the full pad (so the check is known to detect a change): the same
-    // D-pad nudges by the 1% step there. Down first (100 -> 99) because an up-nudge from the
-    // 100% default clamps back to 100 and is invisible. NT reads are eventually consistent even
-    // in-process, so poll briefly for the nudged value.
     disconnect(1);
     connect(0);
     setPov(0, 180);
     for (int i = 0; i < 5; i++) stepRobot();
     assertEquals(
-        flywheelBefore - 1.0,
-        pollFlywheelEntry(flywheelBefore - 1.0),
+        flywheelBefore,
+        pollFlywheelEntry(flywheelBefore),
         EPS,
-        "full-pad D-pad down nudges the flywheel limit");
+        "full-pad D-pad down must not nudge the flywheel limit");
     setPov(0, 0);
     for (int i = 0; i < 5; i++) stepRobot();
-    assertEquals(flywheelBefore, pollFlywheelEntry(flywheelBefore), EPS, "D-pad up nudges it back");
+    assertEquals(
+        flywheelBefore,
+        pollFlywheelEntry(flywheelBefore),
+        EPS,
+        "full-pad D-pad up must not nudge the flywheel limit");
     setPov(0, -1);
     DashboardControlsTestUtil.resetDefaults();
   }
@@ -2325,12 +2557,11 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void manualIsInterruptedByShootingAndRestartsCleanly() {
+  void manualIsInterruptedByShootingAndDirectRestartIsClean() {
     // A legal same-requirements command (Shooting) interrupts a running Manual. The interrupted
-    // Manual never comes back on its own while X is still held, and a fresh press restarts it.
+    // Manual never comes back on its own, and a fresh direct schedule restarts it.
     connect(0);
-    press(0, BUTTON_X);
-    assertTrue(stepUntilManualFeeding(40), "Manual feeds via the X binding");
+    startManualFeedingForSetup();
     assertEquals(
         ManualConstants.ShooterRotpsTunable.getAsDouble(),
         Drum.mInstance.getVelocitySetpointRotPerSec(),
@@ -2350,7 +2581,7 @@ class TeleopIntegrationTest {
         EPS,
         "drum now at the Shooting target");
 
-    release(0, BUTTON_RB); // X is STILL held: the interrupted Manual must not come back
+    release(0, BUTTON_RB);
     settle();
     assertEquals(
         MotorIO.ControlMode.DISABLED,
@@ -2358,15 +2589,16 @@ class TeleopIntegrationTest {
         "Shooting end() stopped the drum; interrupted Manual did not resume");
     assertEquals(0.0, feederSetpoint(), EPS);
 
-    release(0, BUTTON_X);
-    press(0, BUTTON_X);
+    Command restarted = new Manual();
+    restarted.schedule();
+    stepRobot();
     refreshShotRequests();
     assertFeedPathStopped();
-    assertTrue(stepUntilManualFeeding(40), "fresh Manual press feeds after the speed window");
+    assertTrue(stepUntilManualFeeding(40), "fresh Manual run feeds after the speed window");
     assertVelocityFeed(
         ManualConstants.IndexerRotpsTunable.getAsDouble(),
         ManualConstants.FeederRotpsTunable.getAsDouble());
-    release(0, BUTTON_X);
+    restarted.cancel();
   }
 
   @Test
@@ -2437,7 +2669,7 @@ class TeleopIntegrationTest {
 
   @Test
   void manualShootConflictDoesNotCancelTheIntakeLatchIntent() {
-    // X (Manual, port 0 only) borrows the same subsystems; the latch intent survives it too.
+    // Directly scheduled Manual borrows the same subsystems; the latch intent survives it too.
     connect(0);
     pressIntakeToggle(0);
     boolean running = false;
@@ -2447,12 +2679,14 @@ class TeleopIntegrationTest {
     }
     assertTrue(running, "intake latched on");
 
-    press(0, BUTTON_X); // Manual interrupts Intake
+    Command manual = new Manual();
+    manual.schedule();
+    stepRobot();
     for (int i = 0; i < 5; i++) {
       stepRobot();
       assertFalse(intakeRollerRunning(), "intake yields while Manual runs");
     }
-    release(0, BUTTON_X);
+    manual.cancel();
 
     running = false;
     for (int i = 0; i < 10 && !running; i++) {
