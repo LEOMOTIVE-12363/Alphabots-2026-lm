@@ -39,6 +39,7 @@ import frc.robot.util.DashboardControlsTestUtil;
 import frc.robot.util.LoggedTunableNumber;
 import frc.robot.util.OperatorStatus;
 import frc.robot.util.ShotReadiness;
+import java.lang.reflect.Proxy;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -312,17 +313,49 @@ class TeleopIntegrationTest {
   }
 
   /**
-   * Zeroes the simulated indexer's velocity closed-loop target so the measured speed reads
-   * near-zero on the following loop — the low-speed half of the jam's stall evidence. Must run
-   * before each stepRobot() while a stall is wanted: inside the real scheduler the subsystem
-   * periodics precede the command's execute, so a direct write to the logged inputs would be
-   * overwritten before the jam check reads it. Every feeding execute re-writes the real 80 rot/s
-   * target, so the injection is self-clearing once the volley recovers.
+   * Installs a delegating proxy in front of the Indexer's real IO that reports the measured
+   * velocity as zero after every real updateInputs while leaving every motor request and the
+   * underlying physics untouched — the low-speed half of the jam's stall evidence, with the forward
+   * feed still genuinely commanded. Returns the original IO for {@link #restoreIndexerIo}. A direct
+   * write to the logged inputs cannot do this here: inside the real scheduler the subsystem
+   * periodics precede the command's execute, so the IO refresh would overwrite the value before the
+   * jam check reads it.
    */
-  private static void holdIndexerStallTarget() throws Exception {
+  private static MotorIO installIndexerNearZeroVelocityForTest() throws Exception {
     var ioField = MotorSubsystem.class.getDeclaredField("io");
     ioField.setAccessible(true);
-    ((MotorIO) ioField.get(Indexer.mInstance)).setVelocityRotPerSec(0.0);
+    MotorIO original = (MotorIO) ioField.get(Indexer.mInstance);
+    var updateInputs = MotorIO.class.getMethod("updateInputs", MotorIO.MotorIOInputs.class);
+    var velocityField = MotorIO.MotorIOInputs.class.getField("velocityRadPerSec");
+    MotorIO proxied =
+        (MotorIO)
+            Proxy.newProxyInstance(
+                MotorIO.class.getClassLoader(),
+                new Class<?>[] {MotorIO.class},
+                (proxy, method, args) -> {
+                  if (method.getDeclaringClass() == Object.class) {
+                    return switch (method.getName()) {
+                      case "hashCode" -> System.identityHashCode(proxy);
+                      case "equals" -> proxy == args[0];
+                      case "toString" -> "IndexerNearZeroVelocityProxy";
+                      default -> null;
+                    };
+                  }
+                  Object result = method.invoke(original, args);
+                  if (method.equals(updateInputs)) {
+                    velocityField.setDouble(args[0], 0.0);
+                  }
+                  return result;
+                });
+    ioField.set(Indexer.mInstance, proxied);
+    return original;
+  }
+
+  /** Puts the real Indexer IO back; safe to call again with the same original. */
+  private static void restoreIndexerIo(MotorIO original) throws Exception {
+    var ioField = MotorSubsystem.class.getDeclaredField("io");
+    ioField.setAccessible(true);
+    ioField.set(Indexer.mInstance, original);
   }
 
   /** Exposes requests written by the scheduler run that just finished, without another execute. */
@@ -1028,17 +1061,21 @@ class TeleopIntegrationTest {
   @Test
   void portOneRbResumesAfterRestabilizingPostUnjam() throws Exception {
     startFeedingForSetup(1, BUTTON_RB);
+    // Stall evidence that never touches a motor request: the proxy reports the measured velocity
+    // as zero while the feed target the command keeps writing stays untouched. High current with
+    // the feed still commanded and the rotor not moving is the jam the classifier must accept.
+    MotorIO originalIndexerIo = installIndexerNearZeroVelocityForTest();
     Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(100.0);
     try {
       boolean reversing = false;
       for (int i = 0; i < 20 && !reversing; i++) {
-        holdIndexerStallTarget(); // near-zero measured speed: high current alone is not a stall
         stepRobot();
         refreshShotRequests();
         reversing = indexerSetpoint() < -EPS;
       }
       assertTrue(reversing, "the existing jam confirmation still starts the back-off");
       Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(null);
+      restoreIndexerIo(originalIndexerIo); // stall evidence off before the recovery loops
 
       boolean firstNonReverseSeen = false;
       for (int i = 0; i < 40 && !firstNonReverseSeen; i++) {
@@ -1064,6 +1101,7 @@ class TeleopIntegrationTest {
       assertEquals(ShotReadiness.REASON_NONE, OperatorStatus.feedBlockedReason());
     } finally {
       Indexer.mInstance.setStatorCurrentAmpsOverrideForTest(null);
+      restoreIndexerIo(originalIndexerIo);
     }
     release(1, BUTTON_RB);
     settle();
