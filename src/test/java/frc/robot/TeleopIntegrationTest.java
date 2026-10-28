@@ -236,11 +236,12 @@ class TeleopIntegrationTest {
 
   /**
    * Settles the module steer angles to the straight-ahead state (small forward blip, then brake).
-   * Open-loop swerve has no heading hold, and a lateral command from an arbitrary initial wheel
-   * angle produces a large transient heading veer in the sim; starting from aligned wheels keeps
-   * the direction assertions deterministic. The veer itself is a sim/physics observation, recorded
-   * in the acceptance report — the template's joystick drive has no closed-loop heading on real
-   * hardware either.
+   * The demo drive now holds heading and gates startup steer alignment, so a lateral command no
+   * longer veers on its own from arbitrary wheel angles; this helper remains only to isolate the
+   * legacy direction assertions (which sample a pose mid-test) from whatever wheel state earlier
+   * statements left behind. New startup-alignment acceptance must build its own explicit
+   * misalignment (see {@link #parkWithWheelsTangent()}) — calling this to make a veering symptom
+   * disappear would mask the very behavior under test.
    */
   private static void alignWheelsForward() {
     DriverStationSim.setJoystickAxis(1, AXIS_LEFT_Y, -0.3);
@@ -622,7 +623,10 @@ class TeleopIntegrationTest {
   void drivePercentScalesSettledForwardSpeed() {
     setAlliance(AllianceStationID.Blue1);
     connect(1);
-    teleport(new Pose2d(2.0, 2.0, Rotation2d.kZero));
+    // y = 6 lane: the y = 2 lane grazes the maple-sim lower-left trench wall (top edge y=1.579,
+    // x 3.95-5.30) once any startup drift takes the bumper below y~2.0, which contaminates the
+    // settled-speed sample with a collision deflection.
+    teleport(new Pose2d(2.0, 6.0, Rotation2d.kZero));
     setAxis(1, AXIS_LEFT_Y, -1.0);
     double full = meanVx(90);
     assertTrue(full > 1.0, "sanity: 100% moves, |vx|=" + full);
@@ -689,6 +693,339 @@ class TeleopIntegrationTest {
 
     DriverStationSim.setEnabled(true);
     DriverStationSim.notifyNewData();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Startup wheel alignment + straight-line heading hold (2026-10-28)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Parks the robot with its steer wheels at the in-place-rotation (tangent) angles: the rotation
+   * blip commands the tangent headings, and once the stick recenters the zero-speed kinematics
+   * targets each module's LAST COMMANDED heading (the tangent angles, which the wheels have already
+   * reached) at zero drive speed — so they stay tangent while parked. That is a genuine, self-built
+   * "arbitrary initial wheel angle" for the full-speed startup complaint: the tangent pattern is
+   * asymmetric against a forward target and produced the heading veer on the ungated
+   * implementation.
+   */
+  private static void parkWithWheelsTangent() {
+    DriverStationSim.setJoystickAxis(1, AXIS_RIGHT_X, 0.8);
+    for (int i = 0; i < 8; i++) stepRobot();
+    DriverStationSim.setJoystickAxis(1, AXIS_RIGHT_X, 0.0);
+    for (int i = 0; i < 20; i++) stepRobot(); // brake toward the last commanded tangent headings
+  }
+
+  @Test
+  void fullForwardFromTangentWheelsHoldsDriveUntilAlignedThenGoesStraight() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(1);
+    teleport(new Pose2d(3.0, 6.0, Rotation2d.kZero));
+    parkWithWheelsTangent();
+    // The parking spin rotated the body; reset the pose back to the lane WITHOUT touching the
+    // wheels (a pose reset never moves steer angles), so the startup below starts from heading 0
+    // with genuinely tangent wheels.
+    teleport(new Pose2d(3.0, 6.0, Rotation2d.kZero));
+    double startY = pose().getY();
+
+    // Full-speed forward from rest with the wheels at the tangent angles: the drive output must
+    // be held at zero while the steer motors swing, so the robot does not lurch first. Sample a
+    // window long enough that an ungated cosine-scaled launch would have moved it.
+    setAxis(1, AXIS_LEFT_Y, -1.0);
+    double startX = pose().getX();
+    for (int i = 0; i < 8; i++) stepRobot(); // 160 ms: the ~90-degree swing is still in progress
+    double heldDx = pose().getX() - startX;
+    double heldDy = pose().getY() - startY;
+    assertTrue(
+        Math.hypot(heldDx, heldDy) < 0.05,
+        "drive held while the wheels steer to target, moved dx=" + heldDx + " dy=" + heldDy);
+
+    // The hold is bounded: the robot must be rolling forward shortly after.
+    boolean rolling = false;
+    for (int i = 0; i < 75 && !rolling; i++) {
+      stepRobot();
+      rolling = pose().getX() - startX > 0.5;
+    }
+    assertTrue(rolling, "alignment gate released and the robot drives forward");
+
+    // And it drove straight: no lateral veer from the tangent wheels, heading held.
+    assertTrue(
+        Math.abs(pose().getY() - startY) < 0.35,
+        "no lateral veer from tangent startup wheels, y=" + pose().getY() + " start=" + startY);
+    assertTrue(
+        Math.abs(pose().getRotation().getDegrees()) < 10,
+        "heading held during full-speed startup, got " + pose().getRotation().getDegrees());
+    setAxis(1, AXIS_LEFT_Y, 0.0);
+  }
+
+  @Test
+  void headingHoldTracksManualTurnReleaseAndRejectsDisturbance() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(1);
+    teleport(new Pose2d(2.0, 2.0, Rotation2d.kZero));
+    alignWheelsForward();
+    setAxis(1, AXIS_LEFT_Y, -1.0);
+    for (int i = 0; i < 30; i++) stepRobot(); // translating; hold target is 0
+
+    // Manual rotation has absolute priority while the right stick is deflected.
+    setAxis(1, AXIS_RIGHT_X, 1.0);
+    double manualOmega = signedOmega(8);
+    assertTrue(manualOmega < -1.0, "manual turn overrides the hold, omega=" + manualOmega);
+    // Capture the heading at the LAST manual loop — that is exactly the hold target the release
+    // adopts (read before the release step moves the robot again).
+    double releasedHeading = pose().getRotation().getRadians();
+    assertTrue(releasedHeading < -0.3, "manual turn actually rotated: " + releasedHeading);
+    setAxis(1, AXIS_RIGHT_X, 0.0); // release: the heading at this moment becomes the target
+
+    // No spring-back to the pre-turn heading; the robot converges onto the released heading
+    // (the spin carries some momentum past the target before the hold reels it back).
+    for (int i = 0; i < 80; i++) stepRobot();
+    double settledHeading = pose().getRotation().getRadians();
+    assertTrue(
+        Math.abs(settledHeading - releasedHeading) < 0.25,
+        "released heading becomes the target: released="
+            + releasedHeading
+            + " settled="
+            + settledHeading);
+    assertTrue(Math.abs(settledHeading) > 0.25, "no spring-back toward the original 0 heading");
+
+    // A heading disturbance while translating is pulled back to the RELEASED heading.
+    teleport(new Pose2d(pose().getTranslation(), Rotation2d.fromRadians(settledHeading + 0.6)));
+    for (int i = 0; i < 70; i++) stepRobot();
+    double recovered = pose().getRotation().getRadians();
+    assertTrue(
+        Math.abs(recovered - releasedHeading) < 0.2,
+        "disturbance rejected toward the released heading, target="
+            + releasedHeading
+            + " recovered="
+            + recovered);
+    setAxis(1, AXIS_LEFT_Y, 0.0);
+  }
+
+  @Test
+  void parkedRobotDoesNotActivelyRotate() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(1);
+    // A parked robot (no stick input) must never turn itself toward a remembered heading.
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.fromRadians(0.5)));
+    for (int i = 0; i < 25; i++) stepRobot();
+    assertTrue(
+        Math.abs(pose().getRotation().getRadians() - 0.5) < 0.05,
+        "parked robot keeps its disturbed heading: " + pose().getRotation().getRadians());
+    ChassisSpeeds speeds = speeds();
+    assertTrue(Math.abs(speeds.omegaRadiansPerSecond) < 0.05, "no self-rotation: " + speeds);
+  }
+
+  @Test
+  void reEnabledDriveHoldsTheEnableTimeHeadingNotThePreDisableTarget() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(1);
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.kZero));
+    alignWheelsForward();
+    setAxis(1, AXIS_LEFT_Y, -1.0);
+    for (int i = 0; i < 30; i++) stepRobot(); // driving with hold target 0
+    setAxis(1, AXIS_LEFT_Y, 0.0);
+    for (int i = 0; i < 20; i++) stepRobot(); // come to rest
+
+    // Rotate while disabled, then re-enable and drive: the hold target must be the CURRENT
+    // heading at command restart, never the pre-disable target.
+    DriverStationSim.setEnabled(false);
+    DriverStationSim.notifyNewData();
+    stepRobot();
+    teleport(new Pose2d(2.0, 2.0, Rotation2d.fromRadians(0.7)));
+    DriverStationSim.setEnabled(true);
+    DriverStationSim.notifyNewData();
+    setAxis(1, AXIS_LEFT_Y, -1.0);
+    for (int i = 0; i < 30; i++) stepRobot();
+    assertTrue(
+        Math.abs(pose().getRotation().getRadians() - 0.7) < 0.15,
+        "re-enable holds the enable-time heading, got " + pose().getRotation().getRadians());
+
+    // Disturbance proves the target is 0.7 (not the pre-disable 0): it returns to 0.7.
+    teleport(new Pose2d(pose().getTranslation(), Rotation2d.fromRadians(0.35)));
+    for (int i = 0; i < 70; i++) stepRobot();
+    assertTrue(
+        Math.abs(pose().getRotation().getRadians() - 0.7) < 0.25,
+        "disturbed robot returns to the enable-time heading: " + pose().getRotation().getRadians());
+    setAxis(1, AXIS_LEFT_Y, 0.0);
+  }
+
+  @Test
+  void headingResetRebasesTheHoldTargetWhileEnabled() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(1);
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.fromRadians(0.5)));
+    alignWheelsForward();
+    setAxis(1, AXIS_LEFT_Y, -1.0);
+    for (int i = 0; i < 30; i++) stepRobot(); // driving, hold target 0.5
+
+    press(1, BUTTON_B); // resets the pose heading to 0 (blue); the default command restarts
+    release(1, BUTTON_B);
+    for (int i = 0; i < 10; i++) stepRobot();
+    assertEquals(0.0, pose().getRotation().getDegrees(), 3.0, "B reset the pose heading");
+
+    // A disturbance after the reset returns to the RESET heading (0), never to the old 0.5.
+    teleport(new Pose2d(pose().getTranslation(), Rotation2d.fromRadians(0.45)));
+    for (int i = 0; i < 70; i++) stepRobot();
+    assertTrue(
+        Math.abs(pose().getRotation().getRadians()) < 0.25,
+        "hold tracks the reset heading, got " + pose().getRotation().getRadians());
+    setAxis(1, AXIS_LEFT_Y, 0.0);
+  }
+
+  @Test
+  void redAllianceHeadingHoldRejectsDisturbance() {
+    setAlliance(AllianceStationID.Red1);
+    connect(1);
+    teleport(new Pose2d(8.0, 2.0, Rotation2d.kZero));
+    alignWheelsForward();
+    setAxis(1, AXIS_LEFT_Y, -1.0);
+    for (int i = 0; i < 30; i++) stepRobot();
+    assertTrue(pose().getX() < 7.5, "red: forward drives -X: " + pose());
+
+    teleport(new Pose2d(pose().getTranslation(), Rotation2d.fromRadians(0.45)));
+    for (int i = 0; i < 70; i++) stepRobot();
+    assertTrue(
+        Math.abs(pose().getRotation().getRadians()) < 0.25,
+        "hold returns to the target on red too: " + pose().getRotation().getRadians());
+    assertTrue(pose().getX() < 7.0, "still driving flipped -X");
+    setAxis(1, AXIS_LEFT_Y, 0.0);
+  }
+
+  @Test
+  void directionChangeAtSpeedDoesNotReArmTheStartupHold() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(1);
+    teleport(new Pose2d(3.0, 6.0, Rotation2d.kZero));
+    alignWheelsForward();
+    setAxis(1, AXIS_LEFT_Y, -1.0);
+    for (int i = 0; i < 45; i++) stepRobot(); // settled forward along the y = 6 lane
+    setAxis(1, AXIS_LEFT_Y, 0.0);
+    setAxis(1, AXIS_LEFT_X, 1.0); // slam strafe at speed (stays on the field from y = 6)
+
+    // Direct observation, not a settled end-state: the zero-command loop between forward and
+    // strafe must NOT re-arm the startup hold. A re-armed gate zeroes every module drive output
+    // and keeps the robot dead-stopped until the wheels align (measured 0.003 m/s still at the
+    // last loop of this window with the flaw). The legitimate cosine-scaled transition dips
+    // while the wheels swing ~90 degrees (measured floor 0.08 m/s mid-window) but is already
+    // recovering by the end of the window (measured above 1 m/s).
+    double minNorm = Double.MAX_VALUE;
+    double lastNorm = Double.MAX_VALUE;
+    for (int i = 0; i < 10; i++) {
+      stepRobot();
+      ChassisSpeeds s = speeds();
+      lastNorm = Math.hypot(s.vxMetersPerSecond, s.vyMetersPerSecond);
+      minNorm = Math.min(minNorm, lastNorm);
+    }
+    assertTrue(
+        lastNorm > 0.5,
+        "no re-armed hold during the direction change: the robot must be rolling again by the "
+            + "end of the window (lastNorm="
+            + lastNorm
+            + ", minNorm="
+            + minNorm
+            + ")");
+
+    // And it settles into the strafe.
+    double meanVy = meanVy(40);
+    assertTrue(meanVy > 1.0, "robot settles into the strafe, mean |vy|=" + meanVy);
+    assertTrue(
+        Math.abs(pose().getRotation().getDegrees()) < 45, "no wild spin: " + pose().getRotation());
+    setAxis(1, AXIS_LEFT_X, 0.0);
+  }
+
+  @Test
+  void pureManualRotationFromForwardWheelsIsNotDelayedByStartupAlign() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(1);
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.kZero));
+    alignWheelsForward(); // wheels straight: rotation targets (tangent) are far from aligned
+
+    // Full right stick from rest, translation untouched: manual rotation has absolute priority
+    // and the startup-alignment gate must not hold it while the wheels steer to the tangent
+    // angles — measurable rotation must begin within the first few loops.
+    setAxis(1, AXIS_RIGHT_X, 1.0);
+    double earlyOmega = signedOmega(5);
+    assertTrue(
+        Math.abs(earlyOmega) > 0.3,
+        "manual rotation starts immediately, early |omega|=" + earlyOmega);
+    setAxis(1, AXIS_RIGHT_X, 0.0);
+    for (int i = 0; i < 20; i++) stepRobot(); // brake the spin for the next test
+  }
+
+  @Test
+  void translationWithManualRotationFromTangentWheelsIsNotDelayed() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(1);
+    teleport(new Pose2d(3.0, 6.0, Rotation2d.kZero));
+    parkWithWheelsTangent();
+    teleport(new Pose2d(3.0, 6.0, Rotation2d.kZero));
+
+    // Forward + full right stick together from rest: the manual-rotation component opts the
+    // command out of the startup-alignment gate entirely, so rotation begins immediately even
+    // though the wheels are far from the combined target angles.
+    setAxis(1, AXIS_LEFT_Y, -1.0);
+    setAxis(1, AXIS_RIGHT_X, 1.0);
+    double earlyOmega = signedOmega(5);
+    assertTrue(
+        Math.abs(earlyOmega) > 0.3,
+        "combined start rotates immediately, early |omega|=" + earlyOmega);
+    boolean moving = false;
+    for (int i = 0; i < 30 && !moving; i++) {
+      stepRobot();
+      ChassisSpeeds s = speeds();
+      moving = Math.hypot(s.vxMetersPerSecond, s.vyMetersPerSecond) > 1.0;
+    }
+    assertTrue(moving, "the robot is also translating, not gated");
+    setAxis(1, AXIS_RIGHT_X, 0.0);
+    setAxis(1, AXIS_LEFT_Y, 0.0);
+    for (int i = 0; i < 20; i++) stepRobot();
+  }
+
+  @Test
+  void midDriveDisableThenEnableFromMisalignedWheelsStillAligns() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(1);
+    teleport(new Pose2d(3.0, 6.0, Rotation2d.kZero));
+    alignWheelsForward();
+
+    // Rotate in place at a moderate rate: the gate's "commanded last loop" state is live when the
+    // disable hits, and the wheels sit at the rotation-tangent angles (~45 degrees effective
+    // error against a forward target — an ungated start lurches visibly).
+    setAxis(1, AXIS_RIGHT_X, 0.5);
+    for (int i = 0; i < 40; i++) stepRobot();
+
+    // Disable mid-rotation, release the stick, and let the robot coast to a stop while disabled.
+    DriverStationSim.setEnabled(false);
+    DriverStationSim.notifyNewData();
+    DriverStationSim.setJoystickAxis(1, AXIS_RIGHT_X, 0.0);
+    for (int i = 0; i < 120; i++) stepRobot(); // coast out the spin while disabled
+    ChassisSpeeds coasted = speeds();
+    assertTrue(
+        Math.abs(coasted.omegaRadiansPerSecond) < 0.05
+            && Math.hypot(coasted.vxMetersPerSecond, coasted.vyMetersPerSecond) < 0.1,
+        "robot actually came to rest while disabled: " + coasted);
+
+    // Re-enable already holding FORWARD: the wheels are still at the tangent angles, so the
+    // startup gate must arm fresh (disable dropped the stale mid-drive state) and hold the drive
+    // while they steer — the robot must not lunge during the swing.
+    DriverStationSim.setEnabled(true);
+    DriverStationSim.notifyNewData();
+    DriverStationSim.setJoystickAxis(1, AXIS_LEFT_Y, -1.0);
+    double startX = pose().getX();
+    double startY = pose().getY();
+    for (int i = 0; i < 10; i++) stepRobot();
+    double heldDisp = Math.hypot(pose().getX() - startX, pose().getY() - startY);
+    assertTrue(
+        heldDisp < 0.05,
+        "re-enable from misaligned wheels holds the drive during steering, moved " + heldDisp);
+
+    boolean rolling = false;
+    for (int i = 0; i < 75 && !rolling; i++) {
+      stepRobot();
+      rolling = pose().getX() - startX > 0.5;
+    }
+    assertTrue(rolling, "the gate released and the robot drives forward");
+    DriverStationSim.setJoystickAxis(1, AXIS_LEFT_Y, 0.0);
   }
 
   // ---------------------------------------------------------------------------

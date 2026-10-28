@@ -63,6 +63,7 @@ public class Drive extends SubsystemBase {
       new Alert("Disconnected gyro, using kinematics as fallback.", AlertType.kError);
 
   private SwerveDriveKinematics kinematics = new SwerveDriveKinematics(getModuleTranslations());
+  private final StartupAlignGate startupAlignGate = new StartupAlignGate();
   private Rotation2d rawGyroRotation = Rotation2d.kZero;
   private SwerveModulePosition[] lastModulePositions = // For delta tracking
       new SwerveModulePosition[] {
@@ -130,6 +131,9 @@ public class Drive extends SubsystemBase {
       for (var module : modules) {
         module.stop();
       }
+      // The alignment gate must not keep pre-disable state across the disable: a re-enabled
+      // held stick has to be judged against the CURRENT (rested) robot, not the mid-drive past.
+      startupAlignGate.reset();
     }
 
     // Log empty setpoint states when disabled
@@ -160,6 +164,17 @@ public class Drive extends SubsystemBase {
    * @param speeds Speeds in meters/sec
    */
   public void runVelocity(ChassisSpeeds speeds) {
+    runVelocity(speeds, true);
+  }
+
+  /**
+   * Runs the drive at the desired velocity.
+   *
+   * @param speeds Speeds in meters/sec
+   * @param allowStartupAlign false while the caller commands manual rotation (or otherwise must not
+   *     be delayed by the startup steer-alignment gate)
+   */
+  public void runVelocity(ChassisSpeeds speeds, boolean allowStartupAlign) {
     // Apply the dashboard Drive/Turn speed limits (no-op in autonomous)
     speeds = DashboardControls.applyDriveLimits(speeds);
 
@@ -167,6 +182,46 @@ public class Drive extends SubsystemBase {
     ChassisSpeeds discreteSpeeds = ChassisSpeeds.discretize(speeds, 0.02);
     SwerveModuleState[] setpointStates = kinematics.toSwerveModuleStates(discreteSpeeds);
     SwerveDriveKinematics.desaturateWheelSpeeds(setpointStates, TunerConstants.kSpeedAt12Volts);
+
+    // Startup steer alignment: a TRANSLATION command that begins from measured rest (and is not
+    // flagged manual rotation) holds the module drive output at zero until every steer angle
+    // reaches its (optimize-aware) setpoint, so a full-speed start cannot drive the chassis
+    // while the wheels still point somewhere else. Rotation-only commands never arm, a
+    // translation edge while still rolling never re-arms (direction changes at speed keep the
+    // ordinary cosine-scaled steering), and the hold is bounded by
+    // StartupAlignGate.ALIGN_TIMEOUT_SEC. A zero-speed command targets each module's last
+    // COMMANDED heading (the WPILib kinematics cache) at zero drive speed, so wheels already
+    // there simply hold their direction while parked.
+    boolean translationCommanded =
+        Math.abs(discreteSpeeds.vxMetersPerSecond) > 1e-6
+            || Math.abs(discreteSpeeds.vyMetersPerSecond) > 1e-6;
+    boolean allSteerAnglesAligned = true;
+    for (int i = 0; i < 4; i++) {
+      if (StartupAlignGate.optimizedSteerErrorRad(setpointStates[i].angle, modules[i].getAngle())
+          > StartupAlignGate.ALIGN_TOLERANCE_RAD) {
+        allSteerAnglesAligned = false;
+        break;
+      }
+    }
+    ChassisSpeeds measuredSpeeds = getChassisSpeeds();
+    boolean measuredAtRest =
+        Math.abs(measuredSpeeds.vxMetersPerSecond) < StartupAlignGate.REST_LINEAR_SPEED_MPS
+            && Math.abs(measuredSpeeds.vyMetersPerSecond) < StartupAlignGate.REST_LINEAR_SPEED_MPS
+            && Math.abs(measuredSpeeds.omegaRadiansPerSecond)
+                < StartupAlignGate.REST_ANGULAR_SPEED_RADPS;
+    boolean holdStartupDrive =
+        startupAlignGate.shouldHoldDrive(
+            Logger.getTimestamp() * 1e-6,
+            translationCommanded,
+            allowStartupAlign,
+            measuredAtRest,
+            allSteerAnglesAligned);
+    Logger.recordOutput("Drive/StartupAlignHold", holdStartupDrive);
+    if (holdStartupDrive) {
+      for (int i = 0; i < 4; i++) {
+        setpointStates[i].speedMetersPerSecond = 0.0;
+      }
+    }
 
     // Log unoptimized setpoints and setpoint speeds
     Logger.recordOutput("SwerveStates/Setpoints", setpointStates);
