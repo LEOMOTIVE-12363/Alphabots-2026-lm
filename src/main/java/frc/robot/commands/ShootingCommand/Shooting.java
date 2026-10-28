@@ -197,8 +197,8 @@ public class Shooting extends Command {
   /**
    * True when the indexer has been stalled — stator current above the jam threshold AND measured
    * speed near zero — continuously for the debounce window. Both conditions feed the debouncer as
-   * one sample, so a single healthy-speed sample re-anchors the window, and high current while the
-   * indexer keeps turning can never trip UNJAM.
+   * one sample, so a single healthy-speed sample re-anchors the window, and high current at or
+   * above the near-zero speed bound can never trip UNJAM.
    */
   private boolean isIndexerJammed() {
     boolean stalled =
