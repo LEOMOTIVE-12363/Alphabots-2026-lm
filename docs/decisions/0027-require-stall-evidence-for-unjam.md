@@ -13,7 +13,7 @@
 remaining classifier was defective in a code-provable way: stator current above
 90 A sustained for the 0.2 s debounce confirmed UNJAM **by current alone**, even
 while the measured indexer speed showed the indexer was still turning. High
-current while turning is not a stall — the indexer can draw hard while
+current at a healthy speed is not a stall — the indexer can draw hard while
 accelerating a ball load — so the 0.5 s reverse would then reverse a healthy
 feed, manufacturing a forward/reverse/stop cycle independent of any ball jam.
 
@@ -32,11 +32,14 @@ kRising debouncer one combined sample per loop:
 
 Under WPILib 2026.2.1 `Debouncer` kRising semantics, a sample equal to the
 baseline resets the timer, so any single loop at healthy speed re-anchors the
-window: the 0.2 s must be *continuously* stall-classified, and high current
-while the indexer keeps turning can never trip UNJAM.
+window: the 0.2 s must be *continuously* stall-classified, and high current at
+healthy speed (`abs(velocity) ≥ 5.0 rot/s`) cannot trip UNJAM.
 
 Everything else in the state machine is unchanged: the 90 A threshold, 0.2 s
-confirmation, 0.5 s reverse at 50 A indexer / 30 A feeder current, UNJAM
+confirmation, the 0.5 s back-off with default reverse requests of 50 rot/s
+indexer velocity and 30 V feeder voltage (the legacy
+`UNJAM_INDEXER_Current` / `UNJAM_Feeder_Current` tunable names are historical;
+the values feed velocity and voltage requests, not current), UNJAM
 revoking `feedGateReleased`, the post-unjam stable-window re-gating, force-feed
 semantics (the latch bypasses only the post-unjam speed gate, never UNJAM
 itself), clear samples fed during every non-feeding loop, and all state
@@ -51,15 +54,16 @@ far exceeds — while a truly stalled ball cannot move at all.
 
 ## Consequences
 
-High current with the indexer still turning can no longer trip UNJAM, so the
-misclassification-driven forward/reverse/stop cycle is removed in software. A
-true stall still reverses exactly as before.
+High current at healthy speed (`abs(velocity) ≥ 5.0 rot/s`) can no longer trip
+UNJAM, so the misclassification-driven forward/reverse/stop cycle is removed in
+software. A classifier-confirmed stall still commands the same back-off
+requests and duration.
 
 Residual risks, exactly:
 
-1. A real jam that keeps the indexer crawling above 5.0 rot/s is not classified
-   as a stall and will not auto-clear; the operator falls back to 0%, button
-   release, or manual reverse.
+1. A real jam that keeps the indexer crawling at or above 5.0 rot/s is not
+   classified as a stall and will not auto-clear; the operator falls back to
+   0%, button release, or manual reverse.
 2. An unusually slow startup that stays below 5.0 rot/s while drawing more than
    90 A for 0.2 s could still clear spuriously.
 3. The bound is not calibrated — no field log exists. Real current+velocity
@@ -84,11 +88,15 @@ cause, real-robot smoothness, or final tuning is claimed.
   **32 suites / 343 tests / 0 failures / 0 errors / 0 skipped**.
 - Desktop-simulation smoke (same JDK): startup completes and the program runs
   disabled-steady with no Exception/ERROR from the robot program; the only loop
-  overruns (4) trace to maple-sim `simulationPeriodic()` physics steps and one
-  SmartDashboard update in the desktop JVM, not to robot code. The sim's
-  near-instant speed response verifies program wiring and startup only; it is
-  not evidence of real-robot current behavior or shot smoothness.
+  overruns (4) were startup/warmup events involving maple-sim
+  `simulationPeriodic()` physics steps and Phoenix initialization, plus one
+  shutdown-time SmartDashboard update — none attributable to Shooting or
+  steady-state robot operation. The sim's near-instant speed response verifies
+  program wiring and startup only; it is not evidence of real-robot current
+  behavior or shot smoothness.
 - Real-robot acceptance remains pending: after redeploy, retest 25% and 50%
-  with the same ball count — healthy high current must not trip UNJAM, a true
-  stall must still clear, and there must be no repeated stop/go. Until then
-  only the software fix and local verification are claimed.
+  with the same ball count — high current at healthy speed (`abs(velocity) ≥
+  5.0 rot/s`) must not trip UNJAM, a real stall meeting the classifier evidence
+  (high current with speed below 5.0 rot/s) must still clear, and there must be
+  no repeated stop/go. Until then only the software fix and local verification
+  are claimed.
