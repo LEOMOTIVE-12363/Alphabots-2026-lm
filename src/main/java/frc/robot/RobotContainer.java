@@ -11,10 +11,10 @@ import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.FunctionalCommand;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import frc.robot.commands.DriveCommands.DriveCommands;
+import frc.robot.commands.DriveCommands.DriveCommandsConstants;
 import frc.robot.commands.HoodZeroCommand.HoodZeroCommand;
 import frc.robot.commands.IntakeCommand.IntakeCommand;
 import frc.robot.commands.IntakeDeployZeroCommand.IntakeDeployZeroCommand;
-import frc.robot.commands.ManualCommand.Manual;
 import frc.robot.commands.ShootingCommand.Shooting;
 import frc.robot.generated.TunerConstants;
 import frc.robot.simulation.FuelSimulation;
@@ -48,9 +48,6 @@ import org.littletonrobotics.junction.Logger;
  * subsystems, commands, and button mappings) should be declared here.
  */
 public class RobotContainer {
-  // D-pad up/down nudges Flywheel Speed Limit (%) by this much.
-  private static final double FLYWHEEL_PERCENT_STEP = 1.0;
-
   // Subsystems
   private final Drive drive;
 
@@ -171,6 +168,10 @@ public class RobotContainer {
         Commands.run(
             () -> hood.setPositionRot(DashboardControls.getHoodTargetDeg() / 360.0), hood));
 
+    controls.onPress(Action.FACE_FORWARD, () -> snapHeadingCommand(Rotation2d.kZero));
+    controls.onPress(Action.FACE_BACK, () -> snapHeadingCommand(Rotation2d.kPi));
+    controls.onPress(Action.FACE_LEFT, () -> snapHeadingCommand(Rotation2d.fromDegrees(90)));
+    controls.onPress(Action.FACE_RIGHT, () -> snapHeadingCommand(Rotation2d.fromDegrees(-90)));
     controls.onPress(
         Action.RETRACT,
         () -> new IntakeDeployZeroCommand(IntakeDeployZeroCommand.Direction.INWARD));
@@ -186,16 +187,6 @@ public class RobotContainer {
     controls.onRelease(Action.EJECT, this::reverseFeedReleaseCommand);
     controls.whileHeld(Action.EJECT, () -> reverseFeedHeartbeatCommand(true));
 
-    controls.onPress(
-        Action.FLYWHEEL_UP,
-        () ->
-            Commands.runOnce(() -> DashboardControls.adjustFlywheelPercent(FLYWHEEL_PERCENT_STEP)));
-    controls.onPress(
-        Action.FLYWHEEL_DOWN,
-        () ->
-            Commands.runOnce(
-                () -> DashboardControls.adjustFlywheelPercent(-FLYWHEEL_PERCENT_STEP)));
-    controls.whileHeld(Action.MANUAL_SHOOT, Manual::new);
     controls.whileHeld(Action.CURRENT_FEED_SHOOT, () -> new Shooting(true));
     controls.onPress(Action.REVERSE_FEED, this::reverseFeedPressCommand);
     controls.onRelease(Action.REVERSE_FEED, this::reverseFeedReleaseCommand);
@@ -219,6 +210,20 @@ public class RobotContainer {
     controls.onDemoPress(Action.CYCLE_LED_THEME, () -> Commands.runOnce(led::cycleTheme));
     controls.onDemoPress(
         Action.CYCLE_LED_IDLE_EFFECT, () -> Commands.runOnce(led::cycleIdleEffect));
+  }
+
+  private Command snapHeadingCommand(Rotation2d blueTarget) {
+    return Commands.defer(
+        () -> {
+          Rotation2d target =
+              DriverStation.getAlliance().orElse(Alliance.Blue) == Alliance.Red
+                  ? blueTarget.plus(Rotation2d.kPi)
+                  : blueTarget;
+          return DriveCommands.joystickDriveToAngle(
+                  drive, () -> -controls.leftY() * 0.9, () -> -controls.leftX() * 0.9, () -> target)
+              .until(() -> Math.abs(controls.rightX()) > DriveCommandsConstants.DEADBAND);
+        },
+        java.util.Set.of(drive));
   }
 
   private Command resetHeadingCommand() {
