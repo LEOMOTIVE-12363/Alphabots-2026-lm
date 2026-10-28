@@ -39,7 +39,7 @@ No angle PID/profile value, drive scaling, deadband, NetworkTables or log key, E
 
 ## Consequences
 
-A short D-pad press no longer needs to be held while the chassis turns, and the operator can always override it with the right stick. The former D-pad flywheel and retract actions no longer have alternative physical bindings, so their old behavior cannot accidentally compete with heading snap. Port-0 X has one unambiguous action: inward intake retraction and homing, with no Manual drum or feed request.
+A short D-pad press no longer needs to be held while the chassis turns, and the operator can always override it with the right stick. The former D-pad flywheel nudges have no alternative physical binding. Intake retract has moved from D-pad-left to port-0 X, which has one unambiguous action: inward intake retraction and homing, with no Manual drum or feed request. The old D-pad bindings cannot accidentally compete with heading snap.
 
 Finishing uses the existing controller's `atGoal()` semantics; no new heading tolerance was introduced. Desktop simulation verifies command and binding behavior, not real-robot steering dynamics or the feel of the reused gains.
 
@@ -48,5 +48,5 @@ Finishing uses the existing controller's `atGoal()` semantics; no new heading to
 - Post-rebase focused integration run over `TeleopIntegrationTest`, `DriverControlsTest`, and `DriverControlsIntegrationAcceptanceTest`: 88 tests, 0 failures/errors/skips. Coverage includes all blue and red targets, release-then-converge, right-stick/disconnect/priority-loss cancellation, no D-pad flywheel nudges, D-pad-left heading rather than homing, and port-0-only X inward homing with no Manual output.
 - Direct command coverage proves `joystickDriveToAngle` converges, finishes, and restores default drive, while `joystickDriveAtAngle` remains continuous.
 - `./gradlew spotlessApply --offline` and `./gradlew build --offline --rerun-tasks`: BUILD SUCCESSFUL, including Spotless checks; 32 suites / 352 tests / 0 failures / 0 errors / 0 skipped.
-- Bounded `./gradlew simulateJava --offline`: NT3/NT4 started without a port conflict and reached `Robot program startup complete`; no Exception/ERROR was logged. One 20 ms loop-overrun warning included `simulationPeriodic(): 0.031280s`, consistent with the existing maple-sim cost. Only this task's process group was terminated after startup.
+- Bounded `./gradlew simulateJava --offline`: NT3/NT4 started without a port conflict and reached `Robot program startup complete`; no Exception/ERROR was logged. One 20 ms loop-overrun warning was recorded and is not attributed to the new bindings. Only this task's process group was terminated after startup.
 - No robot deploy, physical-controller check, or real-robot heading/intake-homing validation is claimed.
