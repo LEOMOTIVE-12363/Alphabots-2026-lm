@@ -801,8 +801,11 @@ class TeleopIntegrationTest {
     // Resumption of the normal default drive: the stick (ignored while the finishing command
     // owned Drive) moves the robot field-forward again.
     setAxis(1, AXIS_LEFT_Y, -1.0);
-    double meanVx = mean(40, s -> s.vxMetersPerSecond);
-    assertTrue(meanVx > 0.5, "default drive resumed after the finish, mean vx=" + meanVx);
+    double meanVx =
+        mean(
+            40,
+            s -> ChassisSpeeds.fromRobotRelativeSpeeds(s, pose().getRotation()).vxMetersPerSecond);
+    assertTrue(meanVx > 0.5, "default drive resumed after the finish, mean field vx=" + meanVx);
     setAxis(1, AXIS_LEFT_Y, 0.0);
   }
 
