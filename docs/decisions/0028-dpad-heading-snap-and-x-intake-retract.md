@@ -4,6 +4,10 @@
 - Status: Accepted
 - Amends: [0008 — Dual-controller routing with demo-port priority](0008-dual-controller-demo-priority.md)
 
+## Revision 2026-10-29 — port-0 bindings only
+
+[0030 — Port-0 XYBA heading snap and D-pad creep](0030-port-zero-xyba-heading-dpad-creep.md) supersedes the current port-0 bindings in this decision: XYBA now owns heading snap and the D-pad is held low-speed translation. DS1 is unchanged, including its four D-pad snaps and B heading reset. The displaced port-0 operations have no replacement physical bindings, but their commands remain directly schedulable. The text below is retained as the historical 0028 record.
+
 ## Context
 
 The demo controls need a short, reliable way to point the intake/front of the robot at a driver-relative cardinal heading without holding a button throughout the turn. The previous D-pad assignments instead adjusted the flywheel percentage on port 0 and retracted the intake with D-pad left on either controller. Port-0 X also started the fixed-setpoint `Manual` shot, which conflicts with assigning X to intake retraction.

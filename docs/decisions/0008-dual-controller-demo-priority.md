@@ -158,3 +158,7 @@ flywheel nudges and D-pad-left retract are removed, and port-0 X now runs
 inward intake homing instead of `Manual`. The `Manual` command remains
 implemented but has no controller binding. The binding lists above are
 retained as the historical record of the original dual-controller routing.
+
+## Revision 2026-10-29 — port-0 XYBA and D-pad creep
+
+[0030](0030-port-zero-xyba-heading-dpad-creep.md) supersedes only the current port-0 button assignments: XYBA performs heading snap and the D-pad performs held 10% translation. DS1 behavior is unchanged. Displaced port-0 operations receive no new physical bindings, while their commands and direct-scheduling paths remain available.
