@@ -7,8 +7,10 @@ import edu.wpi.first.hal.HAL;
 import edu.wpi.first.wpilibj.simulation.DriverStationSim;
 import edu.wpi.first.wpilibj.simulation.SimHooks;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import frc.lib.io.MotorIO;
 import frc.robot.RobotContainer;
 import frc.robot.commands.ManualCommand.Manual;
+import frc.robot.commands.ShootingCommand.Shooting;
 import frc.robot.subsystems.Feeder.Feeder;
 import frc.robot.subsystems.Indexer.Indexer;
 import frc.robot.subsystems.IntakeRoller.IntakeRoller;
@@ -30,7 +32,6 @@ import org.junit.jupiter.api.Test;
  * so the shared scheduler stays harmless cross-class chatter.
  */
 class DriverControlsIntegrationAcceptanceTest {
-  private static final int BUTTON_A = 1;
   private static final int BUTTON_LB = 5;
   private static final int AXIS_RIGHT_TRIGGER = 3;
   private static final double EPS = 1e-6;
@@ -241,12 +242,24 @@ class DriverControlsIntegrationAcceptanceTest {
 
   @Test
   void acceptanceTakeoverFromCurrentFeedKeepsNewOwnersReverse() {
-    // Same takeover, but the outgoing command is A = Shooting(true) (current-feed).
+    // Same takeover, but the outgoing command is directly scheduled Shooting(true) (current-feed).
     connected(DriverControls.FULL_PORT, true);
     loop();
-    DriverStationSim.setJoystickButton(DriverControls.FULL_PORT, BUTTON_A, true);
+    new Shooting(true)
+        .onlyWhile(() -> controls.activePort() == DriverControls.FULL_PORT)
+        .schedule();
     loop();
-    loop();
+    for (int i = 0;
+        i < 40 && Feeder.mInstance.getControlMode() != MotorIO.ControlMode.CURRENT;
+        i++) {
+      SimHooks.stepTiming(0.02);
+      loop();
+    }
+    assertEquals(
+        MotorIO.ControlMode.CURRENT,
+        Feeder.mInstance.getControlMode(),
+        "outgoing Shooting(true) must establish current-feed before takeover");
+    assertEquals(50.0, Feeder.mInstance.getCurrentSetpointAmps(), EPS);
     assertTakeoverKeepsNewOwnersReverse();
   }
 

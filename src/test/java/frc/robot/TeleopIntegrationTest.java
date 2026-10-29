@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import edu.wpi.first.hal.AllianceStationID;
 import edu.wpi.first.hal.HAL;
+import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.kinematics.ChassisSpeeds;
@@ -1267,6 +1268,15 @@ class TeleopIntegrationTest {
   }
 
   @Test
+  void dpadCreepInputProducesExactTenPercentAfterDeadbandAndSquaring() throws Exception {
+    var inputMethod = RobotContainer.class.getDeclaredMethod("dpadCreepInput");
+    inputMethod.setAccessible(true);
+    double input = (double) inputMethod.invoke(null);
+    double scaled = MathUtil.applyDeadband(input, DriveCommandsConstants.DEADBAND);
+    assertEquals(0.1, scaled * scaled, 1e-12);
+  }
+
+  @Test
   void fullDpadCreepUsesTenPercentSpeedInTheDriversFieldFrame() {
     connect(0);
     double expectedSpeed = 0.1 * Drive.mInstance.getMaxLinearSpeedMetersPerSec();
@@ -1550,7 +1560,7 @@ class TeleopIntegrationTest {
   void portOneUnboundKeysTriggerNothing() {
     arrangeUnreadyShot();
     connect(1);
-    // X (retract), A (current-feed Shooting), Y (zeroing) exist on port 0 only.
+    // Demo XYBA and RT must not start full-pad mechanism actions.
     press(1, BUTTON_X);
     refreshShotRequests();
     assertFeedPathStopped();
@@ -2723,8 +2733,8 @@ class TeleopIntegrationTest {
   @Test
   void dpadUpDownDoNotNudgeFlywheelOnEitherPortAndDemoStartDoesNotResetSim()
       throws InterruptedException {
-    // POV up/down are heading snaps on both pads, never flywheel nudges. Demo Start may still
-    // cycle the LED idle effect, but must not trigger the full pad's sim-reset action.
+    // POV up/down snap on the demo pad and creep on the full pad, never flywheel nudges. Demo Start
+    // may still cycle the LED idle effect, but must not trigger the full pad's sim-reset action.
     connect(1);
     teleport(new Pose2d(3.0, 2.0, Rotation2d.kZero));
     settleToPublish();
