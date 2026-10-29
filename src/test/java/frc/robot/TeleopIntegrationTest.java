@@ -93,6 +93,7 @@ class TeleopIntegrationTest {
   private static final int BUTTON_Y = 4;
   private static final int BUTTON_LB = 5;
   private static final int BUTTON_RB = 6;
+  private static final int BUTTON_START = 8;
   private static final int AXIS_LEFT_X = 0;
   private static final int AXIS_LEFT_Y = 1;
   private static final int AXIS_LEFT_TRIGGER = 2;
@@ -160,7 +161,8 @@ class TeleopIntegrationTest {
   private static void stepRobot() {
     DriverStationSim.notifyNewData();
     CommandScheduler.getInstance().run(); // buttons + subsystem periodics + commands
-    container.pollIntakeLatch(); // mirrors Robot.robotPeriodic's post-scheduler edge poll
+    container.pollIntakeLatch(); // mirrors Robot.robotPeriodic's post-scheduler edge polls
+    container.pollCreepLatch();
     OperatorStatus.update();
     if (++dashboardCounter >= 5) {
       dashboardCounter = 0;
@@ -715,6 +717,38 @@ class TeleopIntegrationTest {
     press(1, BUTTON_B);
     assertEquals(0.0, pose().getRotation().getDegrees(), 0.5, "unknown resets to 0");
     release(1, BUTTON_B);
+
+    DriverStationSim.setEnabled(true);
+    DriverStationSim.notifyNewData();
+  }
+
+  @Test
+  void fullStartMatchesHeadingResetOnBlueAndRedWhileDisabledWithoutResettingSim() {
+    connect(0);
+    DriverStationSim.setEnabled(false);
+    DriverStationSim.notifyNewData();
+
+    teleport(new Pose2d(3.5, 2.5, Rotation2d.fromDegrees(137)));
+    setAlliance(AllianceStationID.Blue1);
+    press(0, BUTTON_START);
+    assertEquals(0.0, pose().getRotation().getDegrees(), 0.5, "DS0 Start: blue reset to 0");
+    assertEquals(3.5, pose().getX(), 0.05, "DS0 Start keeps X instead of resetting the sim");
+    assertEquals(2.5, pose().getY(), 0.05, "DS0 Start keeps Y instead of resetting the sim");
+    assertEquals(3.5, MapleSimArena.getInstance().getRobotPose().getX(), 0.05);
+    assertEquals(2.5, MapleSimArena.getInstance().getRobotPose().getY(), 0.05);
+    release(0, BUTTON_START);
+
+    teleport(new Pose2d(4.0, 3.0, Rotation2d.fromDegrees(-123)));
+    setAlliance(AllianceStationID.Red1);
+    press(0, BUTTON_START);
+    assertTrue(
+        Math.abs(pose().getRotation().minus(Rotation2d.kPi).getDegrees()) < 0.5,
+        "DS0 Start: red reset to 180, got " + pose().getRotation().getDegrees());
+    assertEquals(4.0, pose().getX(), 0.05, "red Start keeps X");
+    assertEquals(3.0, pose().getY(), 0.05, "red Start keeps Y");
+    assertEquals(4.0, MapleSimArena.getInstance().getRobotPose().getX(), 0.05);
+    assertEquals(3.0, MapleSimArena.getInstance().getRobotPose().getY(), 0.05);
+    release(0, BUTTON_START);
 
     DriverStationSim.setEnabled(true);
     DriverStationSim.notifyNewData();
@@ -1297,34 +1331,62 @@ class TeleopIntegrationTest {
       int pov, int xDirection, int yDirection, double expectedSpeed) {
     teleport(new Pose2d(2.0, 6.0, Rotation2d.fromDegrees(45)));
     setPov(0, pov);
+    Command creep = CommandScheduler.getInstance().requiring(Drive.mInstance);
+    double[] velocity = meanFieldVelocity(160);
+    // ModuleIOSim has steady-state speed droop even at full command; allow 5% for its physics.
+    double tolerance = expectedSpeed * 0.05;
+    assertEquals(xDirection * expectedSpeed, velocity[0], tolerance, "field X for POV " + pov);
+    assertEquals(yDirection * expectedSpeed, velocity[1], tolerance, "field Y for POV " + pov);
+    assertEquals(
+        expectedSpeed,
+        Math.hypot(velocity[0], velocity[1]),
+        tolerance,
+        "speed magnitude for POV " + pov);
+
+    setPov(0, -1);
+    assertNotSame(
+        Drive.mInstance.getDefaultCommand(),
+        CommandScheduler.getInstance().requiring(Drive.mInstance),
+        "releasing POV " + pov + " preserves the latch");
+    setPov(0, pov);
+    assertCreepStopped(creep);
+    setPov(0, -1);
+  }
+
+  private static void assertCreepStopped(Command creep) {
+    assertFalse(creep.isScheduled(), "the stop edge cancels the latched command");
+    stepRobot();
+    assertSame(
+        Drive.mInstance.getDefaultCommand(),
+        CommandScheduler.getInstance().requiring(Drive.mInstance),
+        "the next scheduler loop restores default drive");
+  }
+
+  private static double[] meanFieldVelocity(int loops) {
     double sumX = 0.0;
     double sumY = 0.0;
-    for (int loop = 0; loop < 160; loop++) {
+    for (int loop = 0; loop < loops; loop++) {
       stepRobot();
-      if (loop >= 150) {
+      if (loop >= loops - 10) {
         ChassisSpeeds field = ChassisSpeeds.fromRobotRelativeSpeeds(speeds(), pose().getRotation());
         sumX += field.vxMetersPerSecond;
         sumY += field.vyMetersPerSecond;
       }
     }
-    double vx = sumX / 10.0;
-    double vy = sumY / 10.0;
-    // ModuleIOSim has steady-state speed droop even at full command; allow 5% for its physics.
-    double tolerance = expectedSpeed * 0.05;
-    assertEquals(xDirection * expectedSpeed, vx, tolerance, "field X for POV " + pov);
-    assertEquals(yDirection * expectedSpeed, vy, tolerance, "field Y for POV " + pov);
-    assertEquals(expectedSpeed, Math.hypot(vx, vy), tolerance, "speed magnitude for POV " + pov);
-    setPov(0, -1);
+    return new double[] {sumX / 10.0, sumY / 10.0};
   }
 
   @Test
-  void fullDpadCreepHasNoTimeoutAndReleaseRestoresDefaultDrive() {
+  void fullDpadCreepHasNoTimeoutAndSameDirectionStops() {
     setAlliance(AllianceStationID.Blue1);
     connect(0);
     teleport(new Pose2d(2.0, 6.0, Rotation2d.kZero));
     setPov(0, 0);
     Command creep = CommandScheduler.getInstance().requiring(Drive.mInstance);
-    assertNotSame(Drive.mInstance.getDefaultCommand(), creep, "D-pad up starts held creep");
+    assertNotSame(Drive.mInstance.getDefaultCommand(), creep, "D-pad up starts latched creep");
+    setPov(0, -1);
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+
     double expectedSpeed = 0.1 * Drive.mInstance.getMaxLinearSpeedMetersPerSec();
     double vx =
         mean(
@@ -1332,14 +1394,184 @@ class TeleopIntegrationTest {
             s -> ChassisSpeeds.fromRobotRelativeSpeeds(s, pose().getRotation()).vxMetersPerSecond);
     assertEquals(expectedSpeed, vx, expectedSpeed * 0.05, "still creeping after six seconds");
 
+    setPov(0, 0);
+    assertCreepStopped(creep);
     setPov(0, -1);
-    assertSame(
-        Drive.mInstance.getDefaultCommand(),
-        CommandScheduler.getInstance().requiring(Drive.mInstance),
-        "release immediately restores the default joystick command");
     setAxis(0, AXIS_LEFT_Y, -1.0);
     assertTrue(meanVx(40) > 0.5, "the restored default command responds to the left stick");
     setAxis(0, AXIS_LEFT_Y, 0.0);
+  }
+
+  @Test
+  void oppositeDpadDirectionOnTheSameAxisStopsTheLatch() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    int[][] pairs = {{90, 270}, {270, 90}, {0, 180}, {180, 0}};
+    for (int[] pair : pairs) {
+      teleport(new Pose2d(2.0, 6.0, Rotation2d.kZero));
+      setPov(0, pair[0]);
+      Command creep = CommandScheduler.getInstance().requiring(Drive.mInstance);
+      assertNotSame(Drive.mInstance.getDefaultCommand(), creep);
+      setPov(0, -1);
+      assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+
+      setPov(0, pair[1]);
+      assertCreepStopped(creep);
+      setPov(0, -1);
+    }
+  }
+
+  @Test
+  void perpendicularDpadEdgesDoNotChangeTheLatchOrItsDirection() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    double expectedSpeed = 0.1 * Drive.mInstance.getMaxLinearSpeedMetersPerSec();
+    int[][] cases = {{90, 0, 180}, {0, 270, 90}};
+    for (int[] testCase : cases) {
+      int latchedPov = testCase[0];
+      teleport(new Pose2d(2.0, 6.0, Rotation2d.kZero));
+      setPov(0, latchedPov);
+      Command creep = CommandScheduler.getInstance().requiring(Drive.mInstance);
+      setPov(0, -1);
+      assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+
+      for (int i = 1; i < testCase.length; i++) {
+        setPov(0, testCase[i]);
+        assertSame(
+            creep,
+            CommandScheduler.getInstance().requiring(Drive.mInstance),
+            "perpendicular POV " + testCase[i] + " leaves the latch running");
+        setPov(0, -1);
+        assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+      }
+
+      double[] velocity = meanFieldVelocity(160);
+      double tolerance = expectedSpeed * 0.05;
+      if (latchedPov == 90) {
+        assertEquals(0.0, velocity[0], tolerance, "right latch keeps zero field X");
+        assertEquals(-expectedSpeed, velocity[1], tolerance, "right latch keeps moving right");
+      } else {
+        assertEquals(expectedSpeed, velocity[0], tolerance, "up latch keeps moving forward");
+        assertEquals(0.0, velocity[1], tolerance, "up latch keeps zero field Y");
+      }
+      setPov(0, latchedPov);
+      assertCreepStopped(creep);
+      setPov(0, -1);
+    }
+  }
+
+  @Test
+  void joysticksAddToLatchedTranslationAndNeverCancelItsIntent() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    teleport(new Pose2d(2.0, 6.0, Rotation2d.kZero));
+    setPov(0, 0);
+    Command creep = CommandScheduler.getInstance().requiring(Drive.mInstance);
+    setPov(0, -1);
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+
+    setAxis(0, AXIS_LEFT_Y, -0.3);
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+    double combinedForwardVx =
+        mean(
+            120,
+            s -> ChassisSpeeds.fromRobotRelativeSpeeds(s, pose().getRotation()).vxMetersPerSecond);
+    assertTrue(
+        combinedForwardVx > 0.2 * Drive.mInstance.getMaxLinearSpeedMetersPerSec(),
+        "left-forward input adds to the up-latched translation, vx=" + combinedForwardVx);
+    setAxis(0, AXIS_LEFT_Y, 0.3);
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+    setAxis(0, AXIS_LEFT_Y, 0.0);
+
+    setAxis(0, AXIS_LEFT_X, -0.3);
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+    setAxis(0, AXIS_LEFT_X, 0.3);
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+    setAxis(0, AXIS_LEFT_X, 0.0);
+
+    setAxis(0, AXIS_RIGHT_X, 0.6);
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+    assertTrue(signedOmega(10) < -0.3, "right stick still controls rotation during the latch");
+    setAxis(0, AXIS_RIGHT_X, 0.0);
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+
+    teleport(new Pose2d(2.0, 6.0, Rotation2d.kZero));
+    double expectedSpeed = 0.1 * Drive.mInstance.getMaxLinearSpeedMetersPerSec();
+    double[] centered = meanFieldVelocity(160);
+    assertEquals(
+        expectedSpeed,
+        centered[0],
+        expectedSpeed * 0.05,
+        "centered sticks return to exact 10% up-latched speed");
+    assertEquals(0.0, centered[1], expectedSpeed * 0.05, "centered left stick removes its Y input");
+
+    setPov(0, 0);
+    assertCreepStopped(creep);
+    setPov(0, -1);
+  }
+
+  @Test
+  void disableClearsLatchedCreepAndReenableDoesNotResumeIt() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    teleport(new Pose2d(2.0, 6.0, Rotation2d.kZero));
+    setPov(0, 90);
+    Command creep = CommandScheduler.getInstance().requiring(Drive.mInstance);
+    setPov(0, -1);
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+
+    DriverStationSim.setEnabled(false);
+    stepRobot();
+    assertFalse(creep.isScheduled(), "disable cancels the latched command");
+    for (int i = 0; i < 20; i++) stepRobot();
+
+    DriverStationSim.setEnabled(true);
+    stepRobot();
+    for (int i = 0; i < 20; i++) {
+      stepRobot();
+      assertSame(
+          Drive.mInstance.getDefaultCommand(),
+          CommandScheduler.getInstance().requiring(Drive.mInstance),
+          "re-enable must not resume the old latch");
+    }
+
+    setPov(0, 90);
+    assertNotSame(
+        Drive.mInstance.getDefaultCommand(),
+        CommandScheduler.getInstance().requiring(Drive.mInstance),
+        "a fresh post-enable edge starts a new latch");
+    setPov(0, -1);
+    setPov(0, 90);
+    setPov(0, -1);
+  }
+
+  @Test
+  void povHeldWhileDisabledDoesNotStartOnEnable() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    DriverStationSim.setEnabled(false);
+    stepRobot();
+    setPov(0, 0);
+    for (int i = 0; i < 5; i++) stepRobot();
+
+    DriverStationSim.setEnabled(true);
+    stepRobot();
+    for (int i = 0; i < 20; i++) {
+      stepRobot();
+      assertSame(
+          Drive.mInstance.getDefaultCommand(),
+          CommandScheduler.getInstance().requiring(Drive.mInstance),
+          "the disabled press must not become an enable-time edge");
+    }
+    setPov(0, -1);
+    setPov(0, 0);
+    assertNotSame(
+        Drive.mInstance.getDefaultCommand(),
+        CommandScheduler.getInstance().requiring(Drive.mInstance),
+        "release and a fresh press still start normally");
+    setPov(0, -1);
+    setPov(0, 0);
+    setPov(0, -1);
   }
 
   @Test
@@ -1368,7 +1600,43 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void portOneTakeoverStopsFullDpadCreep() {
+  void reconnectWithPovHeldOnlySynchronizesTheEdgeBaseline() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    teleport(new Pose2d(2.0, 6.0, Rotation2d.kZero));
+    setPov(0, 0);
+    setPov(0, -1);
+    assertNotSame(
+        Drive.mInstance.getDefaultCommand(),
+        CommandScheduler.getInstance().requiring(Drive.mInstance));
+    disconnect(0);
+    assertSame(
+        Drive.mInstance.getDefaultCommand(),
+        CommandScheduler.getInstance().requiring(Drive.mInstance));
+
+    DriverStationSim.setJoystickPOV(0, POV_INDEX, 0);
+    connect(0);
+    for (int i = 0; i < 20; i++) {
+      stepRobot();
+      assertSame(
+          Drive.mInstance.getDefaultCommand(),
+          CommandScheduler.getInstance().requiring(Drive.mInstance),
+          "reconnecting with up held must not restart the latch");
+    }
+
+    setPov(0, -1);
+    setPov(0, 0);
+    assertNotSame(
+        Drive.mInstance.getDefaultCommand(),
+        CommandScheduler.getInstance().requiring(Drive.mInstance),
+        "a genuine post-reconnect press starts a new latch");
+    setPov(0, -1);
+    setPov(0, 0);
+    setPov(0, -1);
+  }
+
+  @Test
+  void portOneTakeoverStopsFullDpadCreepAndControlReturnDoesNotResumeIt() {
     setAlliance(AllianceStationID.Blue1);
     connect(0);
     teleport(new Pose2d(2.0, 6.0, Rotation2d.kZero));
@@ -1390,6 +1658,67 @@ class TeleopIntegrationTest {
       stepRobot();
     }
     assertTrue(Math.hypot(speeds().vxMetersPerSecond, speeds().vyMetersPerSecond) < 0.05);
+
+    disconnect(1);
+    for (int i = 0; i < 20; i++) {
+      stepRobot();
+      assertSame(
+          Drive.mInstance.getDefaultCommand(),
+          CommandScheduler.getInstance().requiring(Drive.mInstance),
+          "regaining control with POV still held must not resume the old intent");
+    }
+    setPov(0, -1);
+    setPov(0, 0);
+    assertNotSame(
+        Drive.mInstance.getDefaultCommand(),
+        CommandScheduler.getInstance().requiring(Drive.mInstance),
+        "a fresh edge works after control returns");
+    setPov(0, -1);
+    setPov(0, 0);
+    setPov(0, -1);
+  }
+
+  @Test
+  void driveCommandConflictsYieldAndThenRestoreTheSameLatchedCommand() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    teleport(new Pose2d(2.0, 6.0, Rotation2d.fromDegrees(45)));
+    setPov(0, 90);
+    Command creep = CommandScheduler.getInstance().requiring(Drive.mInstance);
+    setPov(0, -1);
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+
+    press(0, BUTTON_B);
+    Command snap = CommandScheduler.getInstance().requiring(Drive.mInstance);
+    assertNotSame(creep, snap, "the explicit snap temporarily borrows Drive");
+    release(0, BUTTON_B);
+    for (int i = 0; i < 250; i++) stepRobot();
+    assertSame(
+        creep,
+        CommandScheduler.getInstance().requiring(Drive.mInstance),
+        "the original latch resumes after the snap finishes");
+
+    setPov(0, 90);
+    assertCreepStopped(creep);
+    setPov(0, -1);
+
+    teleport(new Pose2d(2.0, 6.0, Rotation2d.fromDegrees(45)));
+    press(0, BUTTON_B);
+    snap = CommandScheduler.getInstance().requiring(Drive.mInstance);
+    release(0, BUTTON_B);
+    setPov(0, 90);
+    assertSame(
+        snap,
+        CommandScheduler.getInstance().requiring(Drive.mInstance),
+        "a latch requested during a snap must not blindly preempt it");
+    setPov(0, -1);
+    for (int i = 0; i < 250; i++) stepRobot();
+    assertSame(
+        creep,
+        CommandScheduler.getInstance().requiring(Drive.mInstance),
+        "the deferred latch starts when Drive becomes idle");
+    setPov(0, 90);
+    setPov(0, -1);
   }
 
   @Test
