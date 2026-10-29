@@ -1479,13 +1479,46 @@ class TeleopIntegrationTest {
     assertTrue(
         combinedForwardVx > 0.2 * Drive.mInstance.getMaxLinearSpeedMetersPerSec(),
         "left-forward input adds to the up-latched translation, vx=" + combinedForwardVx);
-    setAxis(0, AXIS_LEFT_Y, 0.3);
+
+    double maxSpeed = Drive.mInstance.getMaxLinearSpeedMetersPerSec();
+    double tolerance = 0.1 * maxSpeed * 0.05;
+    setAxis(0, AXIS_LEFT_Y, 0.5);
+    teleport(new Pose2d(6.0, 6.0, Rotation2d.kZero));
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+    double[] backward = meanFieldVelocity(160);
+    assertEquals(
+        -0.007367490947 * maxSpeed,
+        backward[0],
+        tolerance,
+        "left-back produces the independently derived small field -X component");
+    assertEquals(0.0, backward[1], tolerance, "left-back keeps the up latch on the X axis");
     assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
     setAxis(0, AXIS_LEFT_Y, 0.0);
 
     setAxis(0, AXIS_LEFT_X, -0.3);
+    teleport(new Pose2d(8.0, 4.0, Rotation2d.kZero));
     assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+    double[] strafeLeft = meanFieldVelocity(160);
+    assertEquals(
+        0.133745664321 * maxSpeed,
+        strafeLeft[0],
+        tolerance,
+        "left strafe preserves the up-latch field +X component");
+    assertEquals(
+        0.107237718447 * maxSpeed, strafeLeft[1], tolerance, "left strafe produces field +Y");
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+
     setAxis(0, AXIS_LEFT_X, 0.3);
+    teleport(new Pose2d(8.0, 4.0, Rotation2d.kZero));
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+    double[] strafeRight = meanFieldVelocity(160);
+    assertEquals(
+        0.133745664321 * maxSpeed,
+        strafeRight[0],
+        tolerance,
+        "right strafe preserves the up-latch field +X component");
+    assertEquals(
+        -0.107237718447 * maxSpeed, strafeRight[1], tolerance, "right strafe produces field -Y");
     assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
     setAxis(0, AXIS_LEFT_X, 0.0);
 
@@ -1506,6 +1539,56 @@ class TeleopIntegrationTest {
     assertEquals(0.0, centered[1], expectedSpeed * 0.05, "centered left stick removes its Y input");
 
     setPov(0, 0);
+    assertCreepStopped(creep);
+    setPov(0, -1);
+  }
+
+  @Test
+  void rightLatchKeepsItsCreepComponentWhileLeftStickDrivesForwardAndBackward() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    teleport(new Pose2d(8.0, 6.0, Rotation2d.kZero));
+    setPov(0, 90);
+    Command creep = CommandScheduler.getInstance().requiring(Drive.mInstance);
+    setPov(0, -1);
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+
+    double maxSpeed = Drive.mInstance.getMaxLinearSpeedMetersPerSec();
+    double tolerance = 0.1 * maxSpeed * 0.05;
+    double expectedRightCreep = -0.133745664321 * maxSpeed;
+    double rightCreepTolerance = Math.abs(expectedRightCreep) * 0.05;
+    setAxis(0, AXIS_LEFT_Y, -0.3);
+    teleport(new Pose2d(8.0, 6.0, Rotation2d.kZero));
+    double[] forward = meanFieldVelocity(160);
+    assertEquals(
+        0.107237718447 * maxSpeed,
+        forward[0],
+        tolerance,
+        "right latch + left-forward produces field +X");
+    assertEquals(
+        expectedRightCreep,
+        forward[1],
+        rightCreepTolerance,
+        "right latch + left-forward preserves the field -Y creep component");
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+
+    setAxis(0, AXIS_LEFT_Y, 0.3);
+    teleport(new Pose2d(8.0, 6.0, Rotation2d.kZero));
+    double[] backward = meanFieldVelocity(160);
+    assertEquals(
+        -0.107237718447 * maxSpeed,
+        backward[0],
+        tolerance,
+        "right latch + left-back produces field -X");
+    assertEquals(
+        expectedRightCreep,
+        backward[1],
+        rightCreepTolerance,
+        "right latch + left-back preserves the field -Y creep component");
+    assertSame(creep, CommandScheduler.getInstance().requiring(Drive.mInstance));
+
+    setAxis(0, AXIS_LEFT_Y, 0.0);
+    setPov(0, 90);
     assertCreepStopped(creep);
     setPov(0, -1);
   }
