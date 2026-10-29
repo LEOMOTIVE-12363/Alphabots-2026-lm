@@ -12,9 +12,7 @@ import edu.wpi.first.wpilibj2.command.FunctionalCommand;
 import edu.wpi.first.wpilibj2.command.Subsystem;
 import frc.robot.commands.DriveCommands.DriveCommands;
 import frc.robot.commands.DriveCommands.DriveCommandsConstants;
-import frc.robot.commands.HoodZeroCommand.HoodZeroCommand;
 import frc.robot.commands.IntakeCommand.IntakeCommand;
-import frc.robot.commands.IntakeDeployZeroCommand.IntakeDeployZeroCommand;
 import frc.robot.commands.ShootingCommand.Shooting;
 import frc.robot.generated.TunerConstants;
 import frc.robot.simulation.FuelSimulation;
@@ -172,10 +170,17 @@ public class RobotContainer {
     controls.onPress(Action.FACE_BACK, () -> snapHeadingCommand(Rotation2d.kPi));
     controls.onPress(Action.FACE_LEFT, () -> snapHeadingCommand(Rotation2d.fromDegrees(90)));
     controls.onPress(Action.FACE_RIGHT, () -> snapHeadingCommand(Rotation2d.fromDegrees(-90)));
-    controls.onPress(
-        Action.RETRACT,
-        () -> new IntakeDeployZeroCommand(IntakeDeployZeroCommand.Direction.INWARD));
-    controls.onPress(Action.RESET_HEADING, this::resetHeadingCommand);
+    controls.onDemoPress(Action.DEMO_FACE_FORWARD, () -> snapHeadingCommand(Rotation2d.kZero));
+    controls.onDemoPress(Action.DEMO_FACE_BACK, () -> snapHeadingCommand(Rotation2d.kPi));
+    controls.onDemoPress(
+        Action.DEMO_FACE_LEFT, () -> snapHeadingCommand(Rotation2d.fromDegrees(90)));
+    controls.onDemoPress(
+        Action.DEMO_FACE_RIGHT, () -> snapHeadingCommand(Rotation2d.fromDegrees(-90)));
+    controls.whileHeld(Action.CREEP_FORWARD, () -> dpadCreepCommand(dpadCreepInput(), 0.0));
+    controls.whileHeld(Action.CREEP_BACK, () -> dpadCreepCommand(-dpadCreepInput(), 0.0));
+    controls.whileHeld(Action.CREEP_LEFT, () -> dpadCreepCommand(0.0, dpadCreepInput()));
+    controls.whileHeld(Action.CREEP_RIGHT, () -> dpadCreepCommand(0.0, -dpadCreepInput()));
+    controls.onDemoPress(Action.RESET_HEADING, this::resetHeadingCommand);
     // INTAKE (LT) is NOT bound here: its latch is driven by pollIntakeLatch()'s real-edge state
     // machine (see the latched-intake note above) so a control-priority change can never
     // masquerade as a fresh press.
@@ -187,15 +192,9 @@ public class RobotContainer {
     controls.onRelease(Action.EJECT, this::reverseFeedReleaseCommand);
     controls.whileHeld(Action.EJECT, () -> reverseFeedHeartbeatCommand(true));
 
-    controls.whileHeld(Action.CURRENT_FEED_SHOOT, () -> new Shooting(true));
     controls.onPress(Action.REVERSE_FEED, this::reverseFeedPressCommand);
     controls.onRelease(Action.REVERSE_FEED, this::reverseFeedReleaseCommand);
     controls.whileHeld(Action.REVERSE_FEED, () -> reverseFeedHeartbeatCommand(false));
-    controls.onPress(
-        Action.ZERO_OUTWARD,
-        () ->
-            new HoodZeroCommand()
-                .alongWith(new IntakeDeployZeroCommand(IntakeDeployZeroCommand.Direction.OUTWARD)));
     controls.onPress(
         Action.RESET_SIM,
         () ->
@@ -210,6 +209,16 @@ public class RobotContainer {
     controls.onDemoPress(Action.CYCLE_LED_THEME, () -> Commands.runOnce(led::cycleTheme));
     controls.onDemoPress(
         Action.CYCLE_LED_IDLE_EFFECT, () -> Commands.runOnce(led::cycleIdleEffect));
+  }
+
+  private static double dpadCreepInput() {
+    // Invert applyDeadband's range rescale so joystickDrive squares this back to exactly 0.1.
+    return DriveCommandsConstants.DEADBAND
+        + (1.0 - DriveCommandsConstants.DEADBAND) * Math.sqrt(0.1);
+  }
+
+  private Command dpadCreepCommand(double x, double y) {
+    return DriveCommands.joystickDrive(drive, () -> x, () -> y, () -> -controls.rightX());
   }
 
   private Command snapHeadingCommand(Rotation2d blueTarget) {

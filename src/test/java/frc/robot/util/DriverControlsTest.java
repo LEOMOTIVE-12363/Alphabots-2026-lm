@@ -33,6 +33,7 @@ class DriverControlsTest {
   // Xbox layout: buttons A=1 B=2 X=3 Y=4 LB=5 RB=6 Start=8; axes 0=leftX 1=leftY 2=LT 3=RT
   // 4=rightX 5=rightY.
   private static final int BUTTON_A = 1;
+  private static final int BUTTON_B = 2;
   private static final int BUTTON_X = 3;
   private static final int BUTTON_Y = 4;
   private static final int BUTTON_LB = 5;
@@ -244,54 +245,52 @@ class DriverControlsTest {
   @Test
   void fullOnlyActionsNeverFireOnDemoPort() {
     DriverControls controls = new DriverControls();
-    Probe a = new Probe(true);
-    Probe retract0 = new Probe(true);
-    Probe retract1 = new Probe(true);
-    Probe y = new Probe(true);
+    Probe forward = new Probe(true);
+    Probe back = new Probe(true);
+    Probe left = new Probe(true);
+    Probe right = new Probe(true);
+    Probe reset = new Probe(true);
     Probe start = new Probe(true);
     Probe rightTrigger = new Probe(true);
-    controls.onPress(Action.CURRENT_FEED_SHOOT, new ProbeFactory(a));
-    controls.onPress(Action.RETRACT, new ProbeFactory(retract0, retract1));
-    controls.onPress(Action.ZERO_OUTWARD, new ProbeFactory(y));
+    controls.onPress(Action.FACE_FORWARD, new ProbeFactory(forward, new Probe(true)));
+    controls.onPress(Action.FACE_BACK, new ProbeFactory(back, new Probe(true)));
+    controls.onPress(Action.FACE_LEFT, new ProbeFactory(left, new Probe(true)));
+    controls.onPress(Action.FACE_RIGHT, new ProbeFactory(right, new Probe(true)));
+    controls.onDemoPress(Action.RESET_HEADING, new ProbeFactory(reset));
     controls.onPress(Action.RESET_SIM, new ProbeFactory(start));
     controls.onPress(Action.REVERSE_FEED, new ProbeFactory(rightTrigger));
 
-    // Full-only inputs on port 1 never fire; cardinal POVs must not fire RETRACT either.
     connect(DriverControls.DEMO_PORT);
+    pressButton(DriverControls.DEMO_PORT, BUTTON_Y);
     pressButton(DriverControls.DEMO_PORT, BUTTON_A);
     pressButton(DriverControls.DEMO_PORT, BUTTON_X);
-    pressButton(DriverControls.DEMO_PORT, BUTTON_Y);
     pressButton(DriverControls.DEMO_PORT, BUTTON_START);
-    setPov(DriverControls.DEMO_PORT, 0);
-    setPov(DriverControls.DEMO_PORT, 180);
-    setPov(DriverControls.DEMO_PORT, 270);
-    setPov(DriverControls.DEMO_PORT, -1);
     DriverStationSim.setJoystickAxis(DriverControls.DEMO_PORT, AXIS_RIGHT_TRIGGER, 1.0);
     runLoop();
-    assertFalse(a.started(), "A must not fire on port 1");
-    assertFalse(retract0.started(), "port 1 X must not fire the port 0 RETRACT instance");
-    assertFalse(retract1.started(), "RETRACT is full-only X, not a demo POV action");
-    assertFalse(y.started(), "Y must not fire on port 1");
+    assertFalse(forward.started(), "demo Y must not fire the full pad's forward snap");
+    assertFalse(back.started(), "demo A must not fire the full pad's back snap");
+    assertFalse(left.started(), "demo X must not fire the full pad's left snap");
     assertFalse(start.started(), "the RESET_SIM Start binding must not fire on port 1");
     assertFalse(rightTrigger.started(), "RT must not fire on port 1");
 
-    // The same full-only inputs on port 0 fire; POV left is not another RETRACT binding.
+    pressButton(DriverControls.DEMO_PORT, BUTTON_B);
+    assertEquals(1, reset.initializeCount, "demo B retains heading reset");
+    assertFalse(right.started(), "demo B is reset, not the full pad's right snap");
+
     disconnect(DriverControls.DEMO_PORT);
     connect(DriverControls.FULL_PORT);
+    pressButton(DriverControls.FULL_PORT, BUTTON_Y);
     pressButton(DriverControls.FULL_PORT, BUTTON_A);
     pressButton(DriverControls.FULL_PORT, BUTTON_X);
-    pressButton(DriverControls.FULL_PORT, BUTTON_Y);
+    pressButton(DriverControls.FULL_PORT, BUTTON_B);
     pressButton(DriverControls.FULL_PORT, BUTTON_START);
-    setPov(DriverControls.FULL_PORT, 0);
-    setPov(DriverControls.FULL_PORT, 180);
-    setPov(DriverControls.FULL_PORT, 270);
-    setPov(DriverControls.FULL_PORT, -1);
     DriverStationSim.setJoystickAxis(DriverControls.FULL_PORT, AXIS_RIGHT_TRIGGER, 1.0);
     runLoop();
-    assertEquals(1, a.initializeCount);
-    assertEquals(1, retract0.initializeCount, "port 0 X fires RETRACT exactly once");
-    assertFalse(retract1.started(), "the demo RETRACT instance stays unused");
-    assertEquals(1, y.initializeCount);
+    assertEquals(1, forward.initializeCount, "full Y snaps forward");
+    assertEquals(1, back.initializeCount, "full A snaps back");
+    assertEquals(1, left.initializeCount, "full X snaps left");
+    assertEquals(1, right.initializeCount, "full B snaps right");
+    assertEquals(1, reset.initializeCount, "full B must not reset heading");
     assertEquals(1, start.initializeCount);
     assertEquals(1, rightTrigger.initializeCount);
   }
@@ -359,15 +358,16 @@ class DriverControlsTest {
   }
 
   @Test
-  void retractOneShotLongCommandCancelsOnDisconnect() {
+  void xybaSnapOneShotLongCommandCancelsOnDisconnect() {
     DriverControls controls = new DriverControls();
     Probe port0 = new Probe(false);
     Probe port1 = new Probe(false);
-    controls.onPress(Action.RETRACT, new ProbeFactory(port0, port1));
+    controls.onPress(Action.FACE_BACK, new ProbeFactory(port0, port1));
 
     connect(DriverControls.FULL_PORT);
-    pressButton(DriverControls.FULL_PORT, BUTTON_X);
-    assertTrue(port0.running(), "long inward homing one-shot started via port 0 X");
+    pressButton(DriverControls.FULL_PORT, BUTTON_A);
+    releaseButton(DriverControls.FULL_PORT, BUTTON_A);
+    assertTrue(port0.running(), "release does not cancel the full pad's long snap");
     disconnect(DriverControls.FULL_PORT);
     assertEquals(Boolean.TRUE, port0.endedInterrupted, "disconnect interrupts the one-shot");
   }

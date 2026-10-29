@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -27,8 +28,11 @@ import frc.lib.io.MotorIO;
 import frc.lib.rebuilt.ShiftUtil;
 import frc.robot.commands.DriveCommands.DriveCommands;
 import frc.robot.commands.DriveCommands.DriveCommandsConstants;
+import frc.robot.commands.HoodZeroCommand.HoodZeroCommand;
+import frc.robot.commands.IntakeDeployZeroCommand.IntakeDeployZeroCommand;
 import frc.robot.commands.ManualCommand.Manual;
 import frc.robot.commands.ManualCommand.ManualConstants;
+import frc.robot.commands.ShootingCommand.Shooting;
 import frc.robot.commands.ShootingCommand.ShootingConstants;
 import frc.robot.simulation.MapleSimArena;
 import frc.robot.subsystems.Drum.Drum;
@@ -441,6 +445,13 @@ class TeleopIntegrationTest {
     connect(port);
     press(port, button);
     assertTrue(stepUntilAnyFeeding(40), "binding started a volley for the test setup");
+  }
+
+  private static Command startCurrentFeedingForSetup() {
+    Command currentFeed = new Shooting(true);
+    currentFeed.schedule();
+    assertTrue(stepUntilAnyFeeding(40), "directly scheduled current feed started a volley");
+    return currentFeed;
   }
 
   private static boolean stepUntilFeeding(int maxLoops) {
@@ -1103,15 +1114,53 @@ class TeleopIntegrationTest {
   }
 
   // ---------------------------------------------------------------------------
-  // Real D-pad heading and port-0 X retract bindings
+  // Real port-0 XYBA snap, port-0 D-pad creep, and demo D-pad snap bindings
   // ---------------------------------------------------------------------------
 
   @Test
-  void blueDpadSnapSequenceWorksOnFullPortAndContinuesAfterRelease() {
+  void blueXybaSnapSequenceWorksOnFullPortAndContinuesAfterRelease() {
     setAlliance(AllianceStationID.Blue1);
     connect(0);
     teleport(new Pose2d(3.0, 2.0, Rotation2d.fromDegrees(45)));
-    assertDpadSnapSequence(0, new int[] {0, 180, 270, 90}, new double[] {0, 180, 90, -90});
+    assertXybaSnapSequence(
+        new int[] {BUTTON_Y, BUTTON_A, BUTTON_X, BUTTON_B}, new double[] {0, 180, 90, -90});
+  }
+
+  @Test
+  void redXybaSnapSequenceWorksOnFullPortAndContinuesAfterRelease() {
+    setAlliance(AllianceStationID.Red1);
+    connect(0);
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.fromDegrees(45)));
+    assertXybaSnapSequence(
+        new int[] {BUTTON_Y, BUTTON_A, BUTTON_X, BUTTON_B}, new double[] {180, 0, -90, 90});
+  }
+
+  private static void assertXybaSnapSequence(int[] buttons, double[] targetsDeg) {
+    for (int i = 0; i < buttons.length; i++) {
+      press(0, buttons[i]);
+      release(0, buttons[i]); // The snap owns convergence after the physical tap ends.
+      for (int loop = 0; loop < 250; loop++) {
+        stepRobot();
+      }
+      double errorDeg =
+          Math.abs(pose().getRotation().minus(Rotation2d.fromDegrees(targetsDeg[i])).getDegrees());
+      assertTrue(
+          errorDeg < 6.0,
+          "full-pad button "
+              + buttons[i]
+              + " must converge to "
+              + targetsDeg[i]
+              + " degrees after release; error="
+              + errorDeg);
+    }
+  }
+
+  @Test
+  void blueDpadSnapSequenceWorksOnDemoPortAndContinuesAfterRelease() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(1);
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.fromDegrees(45)));
+    assertDpadSnapSequence(1, new int[] {0, 180, 270, 90}, new double[] {0, 180, 90, -90});
   }
 
   @Test
@@ -1149,9 +1198,11 @@ class TeleopIntegrationTest {
     setAlliance(AllianceStationID.Blue1);
     connect(0);
     teleport(new Pose2d(3.0, 2.0, Rotation2d.kZero));
-    setPov(0, 180);
+    press(0, BUTTON_A);
     Command snap = CommandScheduler.getInstance().requiring(Drive.mInstance);
-    assertNotNull(snap, "POV down starts a drive-owning snap");
+    assertNotSame(
+        Drive.mInstance.getDefaultCommand(), snap, "full A starts a drive-owning back snap");
+    release(0, BUTTON_A);
 
     setAxis(0, AXIS_RIGHT_X, DriveCommandsConstants.DEADBAND + 0.2);
     assertNotSame(
@@ -1171,8 +1222,10 @@ class TeleopIntegrationTest {
     setAlliance(AllianceStationID.Blue1);
     connect(0);
     teleport(new Pose2d(3.0, 2.0, Rotation2d.kZero));
-    setPov(0, 180);
+    press(0, BUTTON_A);
     Command snap = CommandScheduler.getInstance().requiring(Drive.mInstance);
+    assertNotSame(Drive.mInstance.getDefaultCommand(), snap);
+    release(0, BUTTON_A);
 
     disconnect(0);
     assertNotSame(
@@ -1186,8 +1239,10 @@ class TeleopIntegrationTest {
     setAlliance(AllianceStationID.Blue1);
     connect(0);
     teleport(new Pose2d(3.0, 2.0, Rotation2d.kZero));
-    setPov(0, 180);
+    press(0, BUTTON_A);
     Command snap = CommandScheduler.getInstance().requiring(Drive.mInstance);
+    assertNotSame(Drive.mInstance.getDefaultCommand(), snap);
+    release(0, BUTTON_A);
 
     connect(1);
     assertNotSame(
@@ -1212,22 +1267,142 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void xStartsPortZeroInwardRetractWithoutManualAndDoesNothingOnPortOne() {
+  void fullDpadCreepUsesTenPercentSpeedInTheDriversFieldFrame() {
     connect(0);
-    press(0, BUTTON_X);
+    double expectedSpeed = 0.1 * Drive.mInstance.getMaxLinearSpeedMetersPerSec();
+    setAlliance(AllianceStationID.Blue1);
+    assertFullCreepDirection(0, 1, 0, expectedSpeed);
+    assertFullCreepDirection(180, -1, 0, expectedSpeed);
+    assertFullCreepDirection(270, 0, 1, expectedSpeed);
+    assertFullCreepDirection(90, 0, -1, expectedSpeed);
+
+    setAlliance(AllianceStationID.Red1);
+    assertFullCreepDirection(0, -1, 0, expectedSpeed);
+    assertFullCreepDirection(180, 1, 0, expectedSpeed);
+    assertFullCreepDirection(270, 0, -1, expectedSpeed);
+    assertFullCreepDirection(90, 0, 1, expectedSpeed);
+  }
+
+  private static void assertFullCreepDirection(
+      int pov, int xDirection, int yDirection, double expectedSpeed) {
+    teleport(new Pose2d(2.0, 6.0, Rotation2d.fromDegrees(45)));
+    setPov(0, pov);
+    double sumX = 0.0;
+    double sumY = 0.0;
+    for (int loop = 0; loop < 160; loop++) {
+      stepRobot();
+      if (loop >= 150) {
+        ChassisSpeeds field = ChassisSpeeds.fromRobotRelativeSpeeds(speeds(), pose().getRotation());
+        sumX += field.vxMetersPerSecond;
+        sumY += field.vyMetersPerSecond;
+      }
+    }
+    double vx = sumX / 10.0;
+    double vy = sumY / 10.0;
+    // ModuleIOSim has steady-state speed droop even at full command; allow 5% for its physics.
+    double tolerance = expectedSpeed * 0.05;
+    assertEquals(xDirection * expectedSpeed, vx, tolerance, "field X for POV " + pov);
+    assertEquals(yDirection * expectedSpeed, vy, tolerance, "field Y for POV " + pov);
+    assertEquals(expectedSpeed, Math.hypot(vx, vy), tolerance, "speed magnitude for POV " + pov);
+    setPov(0, -1);
+  }
+
+  @Test
+  void fullDpadCreepHasNoTimeoutAndReleaseRestoresDefaultDrive() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    teleport(new Pose2d(2.0, 6.0, Rotation2d.kZero));
+    setPov(0, 0);
+    Command creep = CommandScheduler.getInstance().requiring(Drive.mInstance);
+    assertNotSame(Drive.mInstance.getDefaultCommand(), creep, "D-pad up starts held creep");
+    double expectedSpeed = 0.1 * Drive.mInstance.getMaxLinearSpeedMetersPerSec();
+    double vx =
+        mean(
+            300,
+            s -> ChassisSpeeds.fromRobotRelativeSpeeds(s, pose().getRotation()).vxMetersPerSecond);
+    assertEquals(expectedSpeed, vx, expectedSpeed * 0.05, "still creeping after six seconds");
+
+    setPov(0, -1);
+    assertSame(
+        Drive.mInstance.getDefaultCommand(),
+        CommandScheduler.getInstance().requiring(Drive.mInstance),
+        "release immediately restores the default joystick command");
+    setAxis(0, AXIS_LEFT_Y, -1.0);
+    assertTrue(meanVx(40) > 0.5, "the restored default command responds to the left stick");
+    setAxis(0, AXIS_LEFT_Y, 0.0);
+  }
+
+  @Test
+  void disconnectStopsFullDpadCreep() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    teleport(new Pose2d(2.0, 6.0, Rotation2d.kZero));
+    setPov(0, 0);
+    Command creep = CommandScheduler.getInstance().requiring(Drive.mInstance);
+    assertNotSame(Drive.mInstance.getDefaultCommand(), creep);
+    double expectedSpeed = 0.1 * Drive.mInstance.getMaxLinearSpeedMetersPerSec();
+    double vx =
+        mean(
+            160,
+            s -> ChassisSpeeds.fromRobotRelativeSpeeds(s, pose().getRotation()).vxMetersPerSecond);
+    assertEquals(expectedSpeed, vx, expectedSpeed * 0.05, "creep was moving before disconnect");
+
+    disconnect(0);
+    assertSame(
+        Drive.mInstance.getDefaultCommand(),
+        CommandScheduler.getInstance().requiring(Drive.mInstance));
+    for (int i = 0; i < 100; i++) {
+      stepRobot();
+    }
+    assertTrue(Math.hypot(speeds().vxMetersPerSecond, speeds().vyMetersPerSecond) < 0.05);
+  }
+
+  @Test
+  void portOneTakeoverStopsFullDpadCreep() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    teleport(new Pose2d(2.0, 6.0, Rotation2d.kZero));
+    setPov(0, 0);
+    Command creep = CommandScheduler.getInstance().requiring(Drive.mInstance);
+    assertNotSame(Drive.mInstance.getDefaultCommand(), creep);
+    double expectedSpeed = 0.1 * Drive.mInstance.getMaxLinearSpeedMetersPerSec();
+    double vx =
+        mean(
+            160,
+            s -> ChassisSpeeds.fromRobotRelativeSpeeds(s, pose().getRotation()).vxMetersPerSecond);
+    assertEquals(expectedSpeed, vx, expectedSpeed * 0.05, "creep was moving before takeover");
+
+    connect(1);
+    assertSame(
+        Drive.mInstance.getDefaultCommand(),
+        CommandScheduler.getInstance().requiring(Drive.mInstance));
+    for (int i = 0; i < 100; i++) {
+      stepRobot();
+    }
+    assertTrue(Math.hypot(speeds().vxMetersPerSecond, speeds().vyMetersPerSecond) < 0.05);
+  }
+
+  @Test
+  void directInwardRetractRunsWithoutManualAndDemoXRemainsUnbound() {
+    connect(0);
+    Command retract = new IntakeDeployZeroCommand(IntakeDeployZeroCommand.Direction.INWARD);
+    retract.schedule();
+    stepRobot();
     double volts = 0.0;
     for (int i = 0; i < 3; i++) {
       stepRobot();
       volts = IntakeDeploy.mInstance.getVoltageSetpoint();
     }
     refreshShotRequests();
-    assertTrue(volts < -0.5, "port 0 X drives inward intake homing, volts=" + volts);
+    assertTrue(volts < -0.5, "direct inward homing drives the deploy motor, volts=" + volts);
     assertEquals(
         0.0,
         Drum.mInstance.getVelocitySetpointRotPerSec(),
         EPS,
-        "X retract must not start Manual's drum request");
+        "retract must not start Manual's drum request");
     assertFeedPathStopped();
+    retract.cancel();
+    settle();
 
     disconnect(0);
     connect(1);
@@ -1241,6 +1416,44 @@ class TeleopIntegrationTest {
         EPS,
         "port 1 X must not start intake homing");
     release(1, BUTTON_X);
+  }
+
+  @Test
+  void fullXybaDoesNotStartDisplacedMechanismCommandsOrResetHeading() {
+    setAlliance(AllianceStationID.Blue1);
+    connect(0);
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.fromDegrees(137)));
+
+    press(0, BUTTON_A);
+    refreshShotRequests();
+    assertFeedPathStopped();
+    assertEquals(0.0, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS, "A is not current feed");
+    release(0, BUTTON_A);
+    CommandScheduler.getInstance().cancelAll();
+    settle();
+
+    press(0, BUTTON_X);
+    settle();
+    assertEquals(0.0, IntakeDeploy.mInstance.getVoltageSetpoint(), EPS, "X is not retract");
+    assertEquals(0.0, Drum.mInstance.getVelocitySetpointRotPerSec(), EPS, "X is not Manual");
+    release(0, BUTTON_X);
+    CommandScheduler.getInstance().cancelAll();
+    settle();
+
+    press(0, BUTTON_Y);
+    settle();
+    assertEquals(0.0, Hood.mInstance.getVoltageSetpoint(), EPS, "Y is not hood zero");
+    assertEquals(0.0, IntakeDeploy.mInstance.getVoltageSetpoint(), EPS, "Y is not outward zero");
+    release(0, BUTTON_Y);
+    CommandScheduler.getInstance().cancelAll();
+    settle();
+
+    teleport(new Pose2d(3.0, 2.0, Rotation2d.fromDegrees(137)));
+    press(0, BUTTON_B);
+    assertTrue(
+        Math.abs(pose().getRotation().getDegrees()) > 100.0,
+        "B starts a snap instead of resetting the heading to zero");
+    release(0, BUTTON_B);
   }
 
   // ---------------------------------------------------------------------------
@@ -1405,8 +1618,23 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void portZeroACurrentWaitsForFlywheelSpeedThenFeeds() {
-    pressWithUnreadyShot(0, BUTTON_A);
+  void directCurrentFeedWaitsForFlywheelSpeedThenFeeds() {
+    connect(0);
+    arrangeUnreadyShot();
+    assertEquals(0.0, Drum.mInstance.getVelocityRotPerSec(), EPS, "drum starts stopped");
+    assertEquals(0.05, Hood.mInstance.getPositionRot(), EPS, "hood starts off target");
+
+    Command currentFeed = new Shooting(true);
+    currentFeed.schedule();
+    stepRobot();
+    assertEquals(
+        0.0,
+        Drum.mInstance.getVelocityRotPerSec(),
+        EPS,
+        "the first execute saw the stopped drum, not a ready measurement");
+    assertEquals(
+        0.05, Hood.mInstance.getPositionRot(), EPS, "the first execute saw the off-target hood");
+    refreshShotRequests();
 
     // Gated exactly like velocity mode: no current request until the flywheel is at speed.
     assertFeedPathStopped();
@@ -1421,7 +1649,7 @@ class TeleopIntegrationTest {
     }
     assertTrue(currentFeeding, "50 A feed starts once the flywheel is at speed and stable");
     assertCurrentFeed();
-    release(0, BUTTON_A);
+    currentFeed.cancel();
     settle();
   }
 
@@ -1506,8 +1734,8 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void portZeroAZeroStopPositiveResumeAfterSpeedWindow() {
-    startFeedingForSetup(0, BUTTON_A);
+  void directCurrentFeedZeroStopPositiveResumeAfterSpeedWindow() {
+    Command currentFeed = startCurrentFeedingForSetup();
     DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
     stepRobot();
     refreshShotRequests();
@@ -1526,7 +1754,7 @@ class TeleopIntegrationTest {
     }
     assertTrue(currentFeeding, "50 A feed resumes after re-reaching speed");
     assertCurrentFeed();
-    release(0, BUTTON_A);
+    currentFeed.cancel();
     settle();
   }
 
@@ -1718,16 +1946,9 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void releaseDuringZeroStopDoesNotAutoResumeCurrentFeedMode() {
-    connect(0); // A = Shooting(true) exists on port 0 only
-    press(0, BUTTON_A);
-    boolean currentFeeding = false;
-    for (int i = 0; i < 40 && !currentFeeding; i++) {
-      stepRobot();
-      currentFeeding =
-          Feeder.mInstance.getControlMode() == MotorIO.ControlMode.CURRENT && feederAmps() > 49.0;
-    }
-    assertTrue(currentFeeding, "current-feed mode feeds at 50 A");
+  void cancelledZeroStoppedCurrentFeedDoesNotAutoResumeAndDirectRestartWorks() {
+    Command currentFeed = startCurrentFeedingForSetup();
+    assertCurrentFeed();
 
     DashboardControlsTestUtil.set(FLYWHEEL, 0.0);
     stepRobot();
@@ -1735,7 +1956,7 @@ class TeleopIntegrationTest {
     assertEquals(0.0, feederAmps(), EPS, "current request withdrawn at 0%");
     assertEquals(0.0, feederSetpoint(), EPS);
 
-    release(0, BUTTON_A);
+    currentFeed.cancel();
     DashboardControlsTestUtil.set(FLYWHEEL, 100.0);
     for (int i = 0; i < 25; i++) {
       stepRobot();
@@ -1743,7 +1964,9 @@ class TeleopIntegrationTest {
       assertEquals(0.0, feederAmps(), EPS, "no current request returns, loop " + i);
     }
 
-    press(0, BUTTON_A);
+    Command restarted = new Shooting(true);
+    restarted.schedule();
+    stepRobot();
     refreshShotRequests();
     assertFeedPathStopped();
     boolean resumedCurrentFeeding = false;
@@ -1752,9 +1975,9 @@ class TeleopIntegrationTest {
       resumedCurrentFeeding =
           Feeder.mInstance.getControlMode() == MotorIO.ControlMode.CURRENT && feederAmps() > 49.0;
     }
-    assertTrue(resumedCurrentFeeding, "fresh A press feeds at 50 A after the speed window");
+    assertTrue(resumedCurrentFeeding, "fresh direct run feeds at 50 A after the speed window");
     assertCurrentFeed();
-    release(0, BUTTON_A);
+    restarted.cancel();
   }
 
   @Test
@@ -2022,11 +2245,12 @@ class TeleopIntegrationTest {
   }
 
   @Test
-  void xRetractHomingStopsWhenItsControllerDisconnects() {
-    connect(0);
-    press(0, BUTTON_X); // port 0 X: IntakeDeployZeroCommand (long one-shot inward homing)
+  void directRetractHomingStopsWhenCancelled() {
+    Command retract = new IntakeDeployZeroCommand(IntakeDeployZeroCommand.Direction.INWARD);
+    retract.schedule();
+    stepRobot();
     // Sample early: in sim the modeled stall current can satisfy the 0.15 s spike debounce and
-    // finish the homing on its own, which is fine — the disconnect must stop it before that.
+    // finish the homing on its own, which is fine — cancellation must stop it before that.
     double volts = 0;
     for (int i = 0; i < 3; i++) {
       stepRobot();
@@ -2034,13 +2258,13 @@ class TeleopIntegrationTest {
     }
     assertTrue(Math.abs(volts) > 0.5, "homing drives the deploy motor, volts=" + volts);
 
-    disconnect(0);
+    retract.cancel();
     settle();
     assertEquals(
         0.0,
         IntakeDeploy.mInstance.getVoltageSetpoint(),
         EPS,
-        "homing command ended on disconnect, motor stopped");
+        "homing command ended on cancellation, motor stopped");
   }
 
   @Test
@@ -2367,7 +2591,11 @@ class TeleopIntegrationTest {
     stepRobot();
     settle();
 
-    press(0, BUTTON_Y);
+    Command zeroOutward =
+        new HoodZeroCommand()
+            .alongWith(new IntakeDeployZeroCommand(IntakeDeployZeroCommand.Direction.OUTWARD));
+    zeroOutward.schedule();
+    stepRobot();
     settle();
     assertEquals(
         -3.0,
@@ -2392,14 +2620,13 @@ class TeleopIntegrationTest {
         Hood.mInstance.getControlMode(),
         "HoodZero must remain in voltage mode after the dashboard edit");
 
-    CommandScheduler.getInstance().cancelAll();
+    zeroOutward.cancel();
     for (int i = 0; i < 3; i++) {
       stepRobot();
     }
     assertHoodPositionTarget(
         18.0 / 360.0,
         "after HoodZero ends, idle following must restore the latest 18 degree target");
-    release(0, BUTTON_Y);
   }
 
   @Test
