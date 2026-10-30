@@ -13,6 +13,7 @@ import edu.wpi.first.wpilibj2.command.Subsystem;
 import frc.robot.commands.DriveCommands.DriveCommands;
 import frc.robot.commands.DriveCommands.DriveCommandsConstants;
 import frc.robot.commands.IntakeCommand.IntakeCommand;
+import frc.robot.commands.IntakeDeployZeroCommand.IntakeDeployZeroCommand;
 import frc.robot.commands.ShootingCommand.Shooting;
 import frc.robot.generated.TunerConstants;
 import frc.robot.simulation.FuelSimulation;
@@ -69,7 +70,7 @@ public class RobotContainer {
   // whether the intake command is currently scheduled: mechanism commands (Shooting, Manual, the
   // homing retract) merely BORROW the shared subsystems — when they finish, the poll reschedules
   // the intake and collection resumes by itself. Only these clear the intent: a second LT press,
-  // an LB outtake press, a robot disable, and the source pad disconnecting/losing priority —
+  // an outtake press, a robot disable, and the source pad disconnecting/losing priority —
   // those never resume on their own; the operator presses LT again.
   //
   // Edge semantics (2026-10-27, decision 0022): the toggle is driven by REAL button edges polled
@@ -196,16 +197,19 @@ public class RobotContainer {
     // machine (see the latched-intake note above) so a control-priority change can never
     // masquerade as a fresh press.
     controls.whileHeld(Action.SHOOT, () -> new Shooting(false));
-    controls.onPress(Action.EJECT, this::reverseFeedPressCommand);
+    controls.onPress(Action.EJECT_FULL, this::reverseFeedPressCommand);
+    controls.onPress(Action.EJECT_FULL, this::stopLatchedIntakeCommand);
+    controls.onRelease(Action.EJECT_FULL, this::reverseFeedReleaseCommand);
+    controls.whileHeld(Action.EJECT_FULL, () -> reverseFeedHeartbeatCommand(true));
+    controls.onDemoPress(Action.EJECT, this::reverseFeedPressCommand);
     // The outtake press also drops the intake latch — see stopLatchedIntakeCommand for why this
     // is a separate poll-phase binding rather than part of applyReverseFeedDesired.
-    controls.onPress(Action.EJECT, this::stopLatchedIntakeCommand);
-    controls.onRelease(Action.EJECT, this::reverseFeedReleaseCommand);
-    controls.whileHeld(Action.EJECT, () -> reverseFeedHeartbeatCommand(true));
-
-    controls.onPress(Action.REVERSE_FEED, this::reverseFeedPressCommand);
-    controls.onRelease(Action.REVERSE_FEED, this::reverseFeedReleaseCommand);
-    controls.whileHeld(Action.REVERSE_FEED, () -> reverseFeedHeartbeatCommand(false));
+    controls.onDemoPress(Action.EJECT, this::stopLatchedIntakeCommand);
+    controls.onDemoRelease(Action.EJECT, this::reverseFeedReleaseCommand);
+    controls.whileDemoHeld(Action.EJECT, () -> reverseFeedHeartbeatCommand(true));
+    controls.onPress(
+        Action.RETRACT_FULL,
+        () -> new IntakeDeployZeroCommand(IntakeDeployZeroCommand.Direction.INWARD));
     controls.onDemoPress(Action.CYCLE_LED_THEME, () -> Commands.runOnce(led::cycleTheme));
     controls.onDemoPress(
         Action.CYCLE_LED_IDLE_EFFECT, () -> Commands.runOnce(led::cycleIdleEffect));
@@ -279,7 +283,8 @@ public class RobotContainer {
   // fires synchronously at schedule time, i.e. during the button-loop poll — before the execution
   // phase where an outgoing priority-lost Shooting/Manual hits isFinished() and its end() zeroes
   // the feeder/indexer/roller. Commands scheduled this loop iterate after long-running ones, so an
-  // execute()-phase write lands after those end() cleanups and a takeover LB survives; a poll-phase
+  // execute()-phase write lands after those end() cleanups and a takeover outtake survives; a
+  // poll-phase
   // write gets clobbered (feeder read 0 V until re-press).
   private Command reverseFeedPressCommand() {
     return reverseFeedApplyCommand(false);
@@ -482,21 +487,20 @@ public class RobotContainer {
   }
 
   /**
-   * Write the reverse outputs requested by the controller currently in control: LB = full reverse
-   * (either port), RT = local reverse (full port only). Whatever is not requested is zeroed, so
-   * releasing one reverse action never kills the other, and the same-loop order of a press and a
-   * losing source's release no longer matters. While disabled everything is zeroed — cleanup lands,
-   * starts do not. The heartbeat bindings only drive the display layers.
+   * Write the full reverse outputs requested by the controller currently in control: RT on the full
+   * controller and LB on the demo controller. Releasing or losing the source zeroes them, while a
+   * same-loop takeover converges on the new source's held state. While disabled everything is
+   * zeroed — cleanup lands, starts do not. The heartbeat bindings only drive the display layers.
    */
   private void applyReverseFeedDesired() {
-    boolean full = controls.isHeldByActiveController(Action.EJECT);
-    boolean local = controls.isHeldByActiveController(Action.REVERSE_FEED);
+    boolean full =
+        controls.isHeldByActiveController(Action.EJECT_FULL)
+            || controls.isHeldByDemoController(Action.EJECT);
     if (DriverStation.isDisabled()) {
       full = false;
-      local = false;
     }
-    Indexer.mInstance.setV(full || local ? -3 : 0);
-    Feeder.mInstance.setV(full || local ? -3 : 0);
+    Indexer.mInstance.setV(full ? -3 : 0);
+    Feeder.mInstance.setV(full ? -3 : 0);
     IntakeRoller.mInstance.setV(full ? -3 : 0);
   }
 

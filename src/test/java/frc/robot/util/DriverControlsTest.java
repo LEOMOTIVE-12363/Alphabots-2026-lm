@@ -252,19 +252,22 @@ class DriverControlsTest {
     Probe reset = new Probe(true);
     Probe start = new Probe(true);
     Probe rightTrigger = new Probe(true);
+    Probe retract = new Probe(true);
     controls.onPress(Action.FACE_FORWARD, new ProbeFactory(forward, new Probe(true)));
     controls.onPress(Action.FACE_BACK, new ProbeFactory(back, new Probe(true)));
     controls.onPress(Action.FACE_LEFT, new ProbeFactory(left, new Probe(true)));
     controls.onPress(Action.FACE_RIGHT, new ProbeFactory(right, new Probe(true)));
     controls.onDemoPress(Action.RESET_HEADING, new ProbeFactory(reset));
     controls.onPress(Action.RESET_HEADING_FULL, new ProbeFactory(start));
-    controls.onPress(Action.REVERSE_FEED, new ProbeFactory(rightTrigger));
+    controls.onPress(Action.EJECT_FULL, new ProbeFactory(rightTrigger));
+    controls.onPress(Action.RETRACT_FULL, new ProbeFactory(retract));
 
     connect(DriverControls.DEMO_PORT);
     pressButton(DriverControls.DEMO_PORT, BUTTON_Y);
     pressButton(DriverControls.DEMO_PORT, BUTTON_A);
     pressButton(DriverControls.DEMO_PORT, BUTTON_X);
     pressButton(DriverControls.DEMO_PORT, BUTTON_START);
+    pressButton(DriverControls.DEMO_PORT, BUTTON_LB);
     DriverStationSim.setJoystickAxis(DriverControls.DEMO_PORT, AXIS_RIGHT_TRIGGER, 1.0);
     runLoop();
     assertFalse(forward.started(), "demo Y must not fire the full pad's forward snap");
@@ -272,6 +275,7 @@ class DriverControlsTest {
     assertFalse(left.started(), "demo X must not fire the full pad's left snap");
     assertFalse(start.started(), "the full-pad Start heading reset must not fire on port 1");
     assertFalse(rightTrigger.started(), "RT must not fire on port 1");
+    assertFalse(retract.started(), "demo LB must not fire the full pad's retract");
 
     pressButton(DriverControls.DEMO_PORT, BUTTON_B);
     assertEquals(1, reset.initializeCount, "demo B retains heading reset");
@@ -284,6 +288,7 @@ class DriverControlsTest {
     pressButton(DriverControls.FULL_PORT, BUTTON_X);
     pressButton(DriverControls.FULL_PORT, BUTTON_B);
     pressButton(DriverControls.FULL_PORT, BUTTON_START);
+    pressButton(DriverControls.FULL_PORT, BUTTON_LB);
     DriverStationSim.setJoystickAxis(DriverControls.FULL_PORT, AXIS_RIGHT_TRIGGER, 1.0);
     runLoop();
     assertEquals(1, forward.initializeCount, "full Y snaps forward");
@@ -292,7 +297,8 @@ class DriverControlsTest {
     assertEquals(1, right.initializeCount, "full B snaps right");
     assertEquals(1, reset.initializeCount, "full B must not reset heading");
     assertEquals(1, start.initializeCount);
-    assertEquals(1, rightTrigger.initializeCount);
+    assertEquals(1, rightTrigger.initializeCount, "full RT ejects");
+    assertEquals(1, retract.initializeCount, "full LB retracts");
   }
 
   @Test
