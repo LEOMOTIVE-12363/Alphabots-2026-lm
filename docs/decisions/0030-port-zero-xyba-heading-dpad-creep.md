@@ -68,3 +68,7 @@ Desktop tests distinguish exact command scaling from maple-sim's measured steady
 - The current-feed takeover acceptance test directly schedules `Shooting(true)` with the port-0 ownership gate, proves the 50 A current-feed state exists before takeover, then retains all original reverse-voltage assertions.
 - Final `./gradlew spotlessApply --offline` and `./gradlew build --offline --rerun-tasks`: BUILD SUCCESSFUL, including Spotless; 33 suites / 379 tests / 0 failures / 0 errors / 0 skipped.
 - Final bounded `./gradlew simulateJava --offline`: startup completed in about 6.52 seconds with NT3/NT4 and Phoenix started normally, no Exception/Error at/ERROR, and one 20 ms loop-overrun warning. Only this task's process group was terminated; no other process or robot deploy was touched.
+
+## Revision 2026-10-29 — latched creep and Start heading reset
+
+[0031](0031-latched-dpad-creep-and-start-heading-reset.md) supersedes only the held D-pad creep behavior, including release-to-stop, and the port-0 Start simulated-field reset. The XYBA heading snaps, displaced-operation handling, exact 10% scaling, DS1 behavior, and every other decision above remain unchanged.
