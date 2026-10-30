@@ -137,7 +137,7 @@ class DriverControlsIntegrationAcceptanceTest {
   void acceptanceTakeoverKeepsNewOwnersReverse() {
     connected(DriverControls.FULL_PORT, true);
     loop();
-    DriverStationSim.setJoystickButton(DriverControls.FULL_PORT, BUTTON_LB, true);
+    DriverStationSim.setJoystickAxis(DriverControls.FULL_PORT, AXIS_RIGHT_TRIGGER, 1.0);
     loop();
     assertEquals(-3, feederVolts(), EPS);
     connected(DriverControls.DEMO_PORT, true);
@@ -157,7 +157,7 @@ class DriverControlsIntegrationAcceptanceTest {
     connected(DriverControls.FULL_PORT, true);
     connected(DriverControls.DEMO_PORT, true);
     loop();
-    DriverStationSim.setJoystickButton(DriverControls.FULL_PORT, BUTTON_LB, true);
+    DriverStationSim.setJoystickAxis(DriverControls.FULL_PORT, AXIS_RIGHT_TRIGGER, 1.0);
     DriverStationSim.setJoystickButton(DriverControls.DEMO_PORT, BUTTON_LB, true);
     loop();
     assertEquals(-3, feederVolts(), EPS);
@@ -169,7 +169,7 @@ class DriverControlsIntegrationAcceptanceTest {
         -3,
         feederVolts(),
         EPS,
-        "fallback controller holds LB but the losing source's cleanup overwrote it");
+        "fallback controller holds RT but the losing source's cleanup overwrote it");
   }
 
   @Test
@@ -300,42 +300,28 @@ class DriverControlsIntegrationAcceptanceTest {
   }
 
   @Test
-  void acceptanceLocalReverseSurvivesFullReverseRelease() {
-    // Port 0 holds RT (local reverse), adds LB (full reverse), then releases LB: the RT-held
-    // indexer/feeder must keep their request, only the intake roller drops.
+  void acceptanceFullRtRunsFullReverseAndFullLbDoesNotReverse() {
     connected(DriverControls.FULL_PORT, true);
     loop();
-    DriverStationSim.setJoystickAxis(DriverControls.FULL_PORT, AXIS_RIGHT_TRIGGER, 1.0);
-    loop();
-    assertEquals(-3, indexerVolts(), EPS, "RT runs the local reverse");
-    assertEquals(-3, feederVolts(), EPS);
-    assertEquals(0, rollerVolts(), EPS, "local reverse leaves the roller alone");
     DriverStationSim.setJoystickButton(DriverControls.FULL_PORT, BUTTON_LB, true);
     loop();
-    assertEquals(-3, rollerVolts(), EPS, "LB extends the reverse to the roller");
+    assertEquals(0, indexerVolts(), EPS, "LB is inward homing, not reverse");
+    assertEquals(0, feederVolts(), EPS);
+    assertEquals(0, rollerVolts(), EPS);
+    DriverStationSim.setJoystickAxis(DriverControls.FULL_PORT, AXIS_RIGHT_TRIGGER, 1.0);
+    loop();
+    assertEquals(-3, indexerVolts(), EPS, "RT runs the complete reverse");
+    assertEquals(-3, feederVolts(), EPS);
+    assertEquals(-3, rollerVolts(), EPS, "RT also reverses the intake roller");
     DriverStationSim.setJoystickButton(DriverControls.FULL_PORT, BUTTON_LB, false);
     loop();
-    assertEquals(-3, indexerVolts(), EPS, "releasing LB must not kill the RT-held reverse");
+    assertEquals(-3, indexerVolts(), EPS, "releasing LB must not clear the RT reverse");
     assertEquals(-3, feederVolts(), EPS);
-    assertEquals(0, rollerVolts(), EPS, "only the LB-owned roller is cleared");
-  }
-
-  @Test
-  void acceptanceFullReverseSurvivesLocalReverseRelease() {
-    // Port 0 holds LB (full reverse), adds RT, then releases RT: the LB-held full reverse must be
-    // untouched.
-    connected(DriverControls.FULL_PORT, true);
-    loop();
-    DriverStationSim.setJoystickButton(DriverControls.FULL_PORT, BUTTON_LB, true);
-    loop();
-    assertEquals(-3, feederVolts(), EPS);
-    DriverStationSim.setJoystickAxis(DriverControls.FULL_PORT, AXIS_RIGHT_TRIGGER, 1.0);
-    loop();
-    assertEquals(-3, feederVolts(), EPS);
+    assertEquals(-3, rollerVolts(), EPS);
     DriverStationSim.setJoystickAxis(DriverControls.FULL_PORT, AXIS_RIGHT_TRIGGER, 0.0);
     loop();
-    assertEquals(-3, indexerVolts(), EPS, "releasing RT must not kill the LB-held reverse");
-    assertEquals(-3, feederVolts(), EPS);
-    assertEquals(-3, rollerVolts(), EPS, "the roller belongs to the still-held LB");
+    assertEquals(0, indexerVolts(), EPS);
+    assertEquals(0, feederVolts(), EPS);
+    assertEquals(0, rollerVolts(), EPS);
   }
 }

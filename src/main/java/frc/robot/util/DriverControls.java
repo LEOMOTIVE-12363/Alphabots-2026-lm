@@ -32,7 +32,8 @@ public final class DriverControls {
     CREEP_RIGHT(true, hid -> hid.getPOV() == 90),
     RESET_HEADING(false, XboxController::getBButton),
     RESET_HEADING_FULL(true, XboxController::getStartButton),
-    REVERSE_FEED(true, hid -> hid.getRightTriggerAxis() > 0.5),
+    EJECT_FULL(true, hid -> hid.getRightTriggerAxis() > 0.5),
+    RETRACT_FULL(true, XboxController::getLeftBumperButton),
     CYCLE_LED_THEME(false, XboxController::getBackButton),
     CYCLE_LED_IDLE_EFFECT(false, XboxController::getStartButton);
 
@@ -84,6 +85,10 @@ public final class DriverControls {
     return action.pressed.test(controllers[port]);
   }
 
+  public boolean isHeldByDemoController(Action action) {
+    return activePort() == DEMO_PORT && action.pressed.test(controllers[DEMO_PORT]);
+  }
+
   public double leftX() {
     return axis(XboxController::getLeftX);
   }
@@ -114,6 +119,18 @@ public final class DriverControls {
     Trigger trigger =
         new Trigger(() -> activePort() == DEMO_PORT && action.pressed.test(controllers[DEMO_PORT]));
     trigger.onTrue(command.get().onlyWhile(() -> activePort() == DEMO_PORT));
+  }
+
+  public void onDemoRelease(Action action, Supplier<Command> command) {
+    Trigger trigger =
+        new Trigger(() -> activePort() == DEMO_PORT && action.pressed.test(controllers[DEMO_PORT]));
+    trigger.onFalse(command.get());
+  }
+
+  public void whileDemoHeld(Action action, Supplier<Command> command) {
+    Trigger trigger =
+        new Trigger(() -> activePort() == DEMO_PORT && action.pressed.test(controllers[DEMO_PORT]));
+    trigger.whileTrue(command.get().onlyWhile(() -> activePort() == DEMO_PORT));
   }
 
   /**

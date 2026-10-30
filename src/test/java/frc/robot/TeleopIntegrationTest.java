@@ -2703,6 +2703,50 @@ class TeleopIntegrationTest {
     assertEquals(0.0, Feeder.mInstance.getVoltageSetpoint(), EPS, "release zeroes");
   }
 
+  @Test
+  void fullRtRunsFullReverseAndFullLbRunsInwardHoming() {
+    connect(0);
+    DriverStationSim.setJoystickAxis(0, 3, 1.0); // RT: full reverse on DS0
+    settle();
+    settle(); // let the execute-phase write reach the next periodic input refresh
+    assertEquals(-3.0, Feeder.mInstance.getVoltageSetpoint(), EPS);
+    assertEquals(-3.0, Indexer.mInstance.getVoltageSetpoint(), EPS);
+    assertEquals(-3.0, IntakeRoller.mInstance.getVoltageSetpoint(), EPS);
+    DriverStationSim.setJoystickAxis(0, 3, 0.0);
+    settle();
+    settle();
+    assertEquals(0.0, Feeder.mInstance.getVoltageSetpoint(), EPS);
+    assertEquals(0.0, Indexer.mInstance.getVoltageSetpoint(), EPS);
+    assertEquals(0.0, IntakeRoller.mInstance.getVoltageSetpoint(), EPS);
+
+    press(0, BUTTON_LB);
+    double volts = 0.0;
+    for (int i = 0; i < 3; i++) {
+      stepRobot();
+      volts = IntakeDeploy.mInstance.getVoltageSetpoint();
+    }
+    assertTrue(volts < -0.5, "DS0 LB runs inward intake homing, volts=" + volts);
+    assertEquals(0.0, Feeder.mInstance.getVoltageSetpoint(), EPS, "LB is not a reverse button");
+    assertEquals(0.0, Indexer.mInstance.getVoltageSetpoint(), EPS);
+    assertEquals(0.0, IntakeRoller.mInstance.getVoltageSetpoint(), EPS);
+    release(0, BUTTON_LB);
+  }
+
+  @Test
+  void demoLbRetainsFullReverse() {
+    connect(1);
+    press(1, BUTTON_LB);
+    settle();
+    assertEquals(-3.0, Feeder.mInstance.getVoltageSetpoint(), EPS);
+    assertEquals(-3.0, Indexer.mInstance.getVoltageSetpoint(), EPS);
+    assertEquals(-3.0, IntakeRoller.mInstance.getVoltageSetpoint(), EPS);
+    release(1, BUTTON_LB);
+    settle();
+    assertEquals(0.0, Feeder.mInstance.getVoltageSetpoint(), EPS);
+    assertEquals(0.0, Indexer.mInstance.getVoltageSetpoint(), EPS);
+    assertEquals(0.0, IntakeRoller.mInstance.getVoltageSetpoint(), EPS);
+  }
+
   // ---------------------------------------------------------------------------
   // Latched intake toggle (2026-10-26): LT press-on / press-off, eject takes over
   // ---------------------------------------------------------------------------

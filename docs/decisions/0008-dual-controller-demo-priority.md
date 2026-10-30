@@ -166,3 +166,7 @@ retained as the historical record of the original dual-controller routing.
 ## Revision 2026-10-29 — latched D-pad creep and Start heading reset
 
 [0031](0031-latched-dpad-creep-and-start-heading-reset.md) supersedes the held port-0 D-pad creep introduced by 0030 and the full-only Start simulated-field reset listed above. All other controller routing and binding decisions remain unchanged.
+
+## Revision 2026-10-30 — full eject on RT and intake retract on LB
+
+[0032](0032-move-full-eject-to-rt-and-retract-to-lb.md) moves the full controller's complete outtake to RT and inward intake homing to LB, deleting the old RT local reverse. DS1 LB outtake and all other DS1 behavior remain unchanged.
