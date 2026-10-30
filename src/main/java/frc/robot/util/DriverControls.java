@@ -31,8 +31,8 @@ public final class DriverControls {
     CREEP_LEFT(true, hid -> hid.getPOV() == 270),
     CREEP_RIGHT(true, hid -> hid.getPOV() == 90),
     RESET_HEADING(false, XboxController::getBButton),
+    RESET_HEADING_FULL(true, XboxController::getStartButton),
     REVERSE_FEED(true, hid -> hid.getRightTriggerAxis() > 0.5),
-    RESET_SIM(true, XboxController::getStartButton),
     CYCLE_LED_THEME(false, XboxController::getBackButton),
     CYCLE_LED_IDLE_EFFECT(false, XboxController::getStartButton);
 

@@ -257,7 +257,7 @@ class DriverControlsTest {
     controls.onPress(Action.FACE_LEFT, new ProbeFactory(left, new Probe(true)));
     controls.onPress(Action.FACE_RIGHT, new ProbeFactory(right, new Probe(true)));
     controls.onDemoPress(Action.RESET_HEADING, new ProbeFactory(reset));
-    controls.onPress(Action.RESET_SIM, new ProbeFactory(start));
+    controls.onPress(Action.RESET_HEADING_FULL, new ProbeFactory(start));
     controls.onPress(Action.REVERSE_FEED, new ProbeFactory(rightTrigger));
 
     connect(DriverControls.DEMO_PORT);
@@ -270,7 +270,7 @@ class DriverControlsTest {
     assertFalse(forward.started(), "demo Y must not fire the full pad's forward snap");
     assertFalse(back.started(), "demo A must not fire the full pad's back snap");
     assertFalse(left.started(), "demo X must not fire the full pad's left snap");
-    assertFalse(start.started(), "the RESET_SIM Start binding must not fire on port 1");
+    assertFalse(start.started(), "the full-pad Start heading reset must not fire on port 1");
     assertFalse(rightTrigger.started(), "RT must not fire on port 1");
 
     pressButton(DriverControls.DEMO_PORT, BUTTON_B);

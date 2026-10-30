@@ -84,6 +84,13 @@ public class RobotContainer {
   private final boolean[] intakeHeldLastLoop = new boolean[2];
   private final boolean[] intakeConnectedLastLoop = new boolean[2];
 
+  private boolean creepLatchDesired;
+  private int creepLatchSource = -1;
+  private int creepLatchPov = -1;
+  private int creepPovLastLoop = -1;
+  private boolean creepConnectedLastLoop;
+  private final Command latchedCreep;
+
   /** The container for the robot. Contains subsystems, OI devices, and commands. */
   public RobotContainer() {
     switch (Constants.currentMode) {
@@ -147,6 +154,13 @@ public class RobotContainer {
         break;
     }
     Drive.mInstance = drive;
+    latchedCreep =
+        DriveCommands.joystickDrive(
+                drive,
+                () -> -controls.leftY() * 0.9 + creepOffsetX(),
+                () -> -controls.leftX() * 0.9 + creepOffsetY(),
+                () -> -controls.rightX())
+            .onlyWhile(() -> controls.activePort() == creepLatchSource);
 
     // Demo robot: no autonomous routines, no vision — teleop only.
 
@@ -176,10 +190,7 @@ public class RobotContainer {
         Action.DEMO_FACE_LEFT, () -> snapHeadingCommand(Rotation2d.fromDegrees(90)));
     controls.onDemoPress(
         Action.DEMO_FACE_RIGHT, () -> snapHeadingCommand(Rotation2d.fromDegrees(-90)));
-    controls.whileHeld(Action.CREEP_FORWARD, () -> dpadCreepCommand(dpadCreepInput(), 0.0));
-    controls.whileHeld(Action.CREEP_BACK, () -> dpadCreepCommand(-dpadCreepInput(), 0.0));
-    controls.whileHeld(Action.CREEP_LEFT, () -> dpadCreepCommand(0.0, dpadCreepInput()));
-    controls.whileHeld(Action.CREEP_RIGHT, () -> dpadCreepCommand(0.0, -dpadCreepInput()));
+    controls.onPress(Action.RESET_HEADING_FULL, this::resetHeadingCommand);
     controls.onDemoPress(Action.RESET_HEADING, this::resetHeadingCommand);
     // INTAKE (LT) is NOT bound here: its latch is driven by pollIntakeLatch()'s real-edge state
     // machine (see the latched-intake note above) so a control-priority change can never
@@ -195,17 +206,6 @@ public class RobotContainer {
     controls.onPress(Action.REVERSE_FEED, this::reverseFeedPressCommand);
     controls.onRelease(Action.REVERSE_FEED, this::reverseFeedReleaseCommand);
     controls.whileHeld(Action.REVERSE_FEED, () -> reverseFeedHeartbeatCommand(false));
-    controls.onPress(
-        Action.RESET_SIM,
-        () ->
-            Commands.runOnce(
-                    () -> {
-                      if (Constants.currentMode == Constants.Mode.SIM
-                          && MapleSimArena.getInstance() != null) {
-                        MapleSimArena.getInstance().resetField();
-                      }
-                    })
-                .ignoringDisable(true));
     controls.onDemoPress(Action.CYCLE_LED_THEME, () -> Commands.runOnce(led::cycleTheme));
     controls.onDemoPress(
         Action.CYCLE_LED_IDLE_EFFECT, () -> Commands.runOnce(led::cycleIdleEffect));
@@ -217,8 +217,26 @@ public class RobotContainer {
         + (1.0 - DriveCommandsConstants.DEADBAND) * Math.sqrt(0.1);
   }
 
-  private Command dpadCreepCommand(double x, double y) {
-    return DriveCommands.joystickDrive(drive, () -> x, () -> y, () -> -controls.rightX());
+  private double creepOffsetX() {
+    if (!creepLatchDesired) {
+      return 0.0;
+    }
+    return switch (creepLatchPov) {
+      case 0 -> dpadCreepInput();
+      case 180 -> -dpadCreepInput();
+      default -> 0.0;
+    };
+  }
+
+  private double creepOffsetY() {
+    if (!creepLatchDesired) {
+      return 0.0;
+    }
+    return switch (creepLatchPov) {
+      case 90 -> -dpadCreepInput();
+      case 270 -> dpadCreepInput();
+      default -> 0.0;
+    };
   }
 
   private Command snapHeadingCommand(Rotation2d blueTarget) {
@@ -357,6 +375,86 @@ public class RobotContainer {
     // loop resumes collection.
     if (intakeLatchDesired && !latchedIntake.isScheduled() && intakeRequirementsAreFree()) {
       latchedIntake.schedule();
+    }
+  }
+
+  /**
+   * Polls the full controller's raw POV edges for the latched crawl. A disconnected pad freezes its
+   * edge baseline, and the reconnect loop only resynchronizes it. Same-axis edges stop an active
+   * latch, perpendicular edges are ignored, and disable/disconnect/priority loss clear its intent.
+   */
+  public void pollCreepLatch() {
+    if (creepLatchDesired
+        && (DriverStation.isDisabled()
+            || creepLatchSource != DriverControls.FULL_PORT
+            || !DriverStation.isJoystickConnected(creepLatchSource)
+            || controls.activePort() != creepLatchSource)) {
+      clearCreepLatchIntent();
+    }
+
+    boolean connected = DriverStation.isJoystickConnected(DriverControls.FULL_PORT);
+    if (!connected) {
+      creepConnectedLastLoop = false;
+      return;
+    }
+
+    int pov = fullCreepPov();
+    if (!creepConnectedLastLoop) {
+      creepConnectedLastLoop = true;
+      creepPovLastLoop = pov;
+    } else {
+      boolean rising = pov >= 0 && pov != creepPovLastLoop;
+      creepPovLastLoop = pov;
+      if (rising
+          && controls.activePort() == DriverControls.FULL_PORT
+          && !DriverStation.isDisabled()) {
+        handleCreepEdge(pov);
+      }
+    }
+
+    if (creepLatchDesired && !latchedCreep.isScheduled() && !DriverStation.isDisabled()) {
+      Command driveOwner = CommandScheduler.getInstance().requiring(drive);
+      if (driveOwner == null || driveOwner == drive.getDefaultCommand()) {
+        latchedCreep.schedule();
+      }
+    }
+  }
+
+  private int fullCreepPov() {
+    if (controls.isHeldByPort(DriverControls.FULL_PORT, Action.CREEP_FORWARD)) {
+      return 0;
+    }
+    if (controls.isHeldByPort(DriverControls.FULL_PORT, Action.CREEP_RIGHT)) {
+      return 90;
+    }
+    if (controls.isHeldByPort(DriverControls.FULL_PORT, Action.CREEP_BACK)) {
+      return 180;
+    }
+    if (controls.isHeldByPort(DriverControls.FULL_PORT, Action.CREEP_LEFT)) {
+      return 270;
+    }
+    return -1;
+  }
+
+  private void handleCreepEdge(int pov) {
+    if (creepLatchDesired) {
+      boolean sameAxis = (creepLatchPov == 0 || creepLatchPov == 180) == (pov == 0 || pov == 180);
+      if (sameAxis) {
+        clearCreepLatchIntent();
+      }
+      return;
+    }
+    creepLatchDesired = true;
+    creepLatchSource = DriverControls.FULL_PORT;
+    creepLatchPov = pov;
+  }
+
+  private void clearCreepLatchIntent() {
+    creepLatchDesired = false;
+    creepLatchSource = -1;
+    creepLatchPov = -1;
+    if (latchedCreep.isScheduled()) {
+      latchedCreep.cancel();
     }
   }
 

@@ -259,7 +259,7 @@ class LEDControllerIntegrationTest {
   }
 
   @Test
-  void fullBackIsIgnoredAndFullStartKeepsSimulationResetWithoutCyclingEffect() {
+  void fullBackIsIgnoredAndFullStartResetsHeadingWithoutCyclingOrResettingSim() {
     connect(DriverControls.FULL_PORT);
     selectFromElastic(LEDPattern.CANDLE_MEMORY, IdleEffect.COLOR_STEP);
     Drive.mInstance.setPose(new Pose2d(3.0, 2.0, Rotation2d.fromDegrees(137)));
@@ -276,9 +276,10 @@ class LEDControllerIntegrationTest {
     disconnect(DriverControls.DEMO_PORT);
     click(DriverControls.FULL_PORT, BUTTON_START);
     assertSelection(LEDPattern.CANDLE_MEMORY, IdleEffect.COLOR_STEP);
-    assertDrivePose(1.5, 4.0, 0.0);
-    assertEquals(1.5, MapleSimArena.getInstance().getRobotPose().getX(), EPS);
-    assertEquals(4.0, MapleSimArena.getInstance().getRobotPose().getY(), EPS);
+    assertDrivePose(3.0, 2.0, 0.0);
+    assertEquals(3.0, MapleSimArena.getInstance().getRobotPose().getX(), EPS);
+    assertEquals(2.0, MapleSimArena.getInstance().getRobotPose().getY(), EPS);
+    assertEquals(0.0, MapleSimArena.getInstance().getRobotPose().getRotation().getDegrees(), EPS);
   }
 
   @Test
